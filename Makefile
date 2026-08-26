@@ -24,7 +24,9 @@ CLIENT_SRCS := client/src/httpclient.c src/json.c
 TESTS := $(BUILD)/test_store $(BUILD)/test_http $(BUILD)/test_serve $(BUILD)/test_push \
 	$(BUILD)/test_import $(BUILD)/test_manifest $(BUILD)/test_gc $(BUILD)/test_contract
 
-.PHONY: all clean
+PREFIX := /opt/cixcache
+
+.PHONY: all clean install
 
 all: $(BUILD)/cixcached $(BUILD)/cixcachectl $(TESTS)
 
@@ -78,6 +80,23 @@ $(BUILD)/test_gc: test/test_gc.c | $(BUILD)
 
 $(BUILD)/test_contract: test/test_contract.c | $(BUILD)
 	$(CC) $(CFLAGS) -Itest $< -o $@
+
+#
+# The Cix repository deliberately has no install target -- it deploys
+# through its own pkg recipe system and A/B image slots. cix-cache has
+# no such machinery to lean on, so it carries one, which keeps a
+# deployment reproducible instead of a remembered pile of cp commands.
+#
+# Does not touch the store or the config: a store is operator data and
+# a config holds a token, and reinstalling a binary must never overwrite
+# either.
+#
+install: $(BUILD)/cixcached $(BUILD)/cixcachectl
+	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/web $(DESTDIR)$(PREFIX)/etc
+	install -m 0755 $(BUILD)/cixcached $(DESTDIR)$(PREFIX)/bin/cixcached
+	install -m 0755 $(BUILD)/cixcachectl $(DESTDIR)$(PREFIX)/bin/cixcachectl
+	install -m 0644 web/index.html web/app.js web/style.css $(DESTDIR)$(PREFIX)/share/web/
+	@echo "installed to $(DESTDIR)$(PREFIX)"
 
 clean:
 	rm -rf $(BUILD)

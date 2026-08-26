@@ -1,0 +1,36 @@
+[Unit]
+Description=cix-cache artifact registry
+Documentation=https://git.home.arpa/itdlabs/cix-cache
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=osakka
+Group=ldap_users
+ExecStart=/opt/cixcache/bin/cixcached --config=/opt/cixcache/etc/cixcache.conf
+Restart=on-failure
+RestartSec=2
+
+# The registry serves opaque bytes and is never a trust boundary, so it
+# needs no privilege of any kind beyond reading its store and binding
+# one port.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/osakka/cix-cache/cache
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

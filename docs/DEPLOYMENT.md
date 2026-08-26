@@ -1,5 +1,31 @@
 # Deploying cix-cache
 
+## Installing
+
+```
+make
+sudo make install                      # binaries + web assets to /opt/cixcache
+sudo install -m 0640 deploy/cixcache.conf.example /opt/cixcache/etc/cixcache.conf
+sudo $EDITOR /opt/cixcache/etc/cixcache.conf      # set root= and push_token=
+sudo install -m 0644 deploy/cixcache.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now cixcache
+```
+
+`PREFIX` and `DESTDIR` are honoured, so `make install PREFIX=/usr/local`
+works. Installing never touches the store or an existing config -- a
+store is operator data and a config holds a credential, so reinstalling
+a binary must not overwrite either.
+
+The unit runs unprivileged under `ProtectSystem=strict` with the store as
+its only writable path. The registry serves opaque bytes and is never a
+trust boundary, so it needs no privilege beyond reading its store and
+binding one port. Point `ReadWritePaths=` at whatever `root=` is.
+
+```
+systemctl status cixcache
+journalctl -u cixcache -f          # MISS lines land here
+```
+
 ## Running the server
 
 ```

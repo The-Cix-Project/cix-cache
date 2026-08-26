@@ -1,0 +1,23 @@
+# cixcached configuration. Command-line flags override these.
+#
+# Copy to /opt/cixcache/etc/cixcache.conf, set a real push_token, and
+# keep it mode 0640 -- it holds a credential.
+
+# Where the store lives. Anything on one filesystem with the store is
+# fine; blobs/, packages/, images/ and tmp/ are created on first start.
+root=/var/lib/cixcache
+
+bind=0.0.0.0
+port=8080
+web_root=/opt/cixcache/share/web
+
+# Pull may be open: consumers verify every byte against a checksum that
+# comes from git, so an open pull surface gives an attacker nothing they
+# could make a host accept. Push may not -- an open push lets anyone
+# fill the disk, or plant blobs every puller then has to fetch and
+# reject. Generate one with:
+#
+#     head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n'
+#
+pull_token=
+push_token=CHANGE-ME
