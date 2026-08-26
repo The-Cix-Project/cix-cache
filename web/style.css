@@ -1,0 +1,352 @@
+/*
+ * Hand-rolled, no framework and no build step, matching the Cix
+ * dashboard's own approach (its ADR-0010). Colours are defined once as
+ * custom properties so light and dark differ only in the token block,
+ * never in a rule.
+ */
+:root {
+	color-scheme: light dark;
+	--bg: #f5f5f7;
+	--panel: #ffffff;
+	--text: #1c1c1e;
+	--muted: #6e6e73;
+	--border: #d8d8dc;
+	--ok: #1e8e3e;
+	--warn: #c77b06;
+	--error: #c5221f;
+	--accent: #0b64c4;
+	/* An overlay rather than a fixed colour, so it composites
+	 * correctly over whatever --panel is in this theme. */
+	--row-alt: rgba(0, 0, 0, 0.035);
+}
+
+@media (prefers-color-scheme: dark) {
+	:root:not([data-theme="light"]) {
+		--bg: #121214;
+		--panel: #1c1c1e;
+		--text: #f2f2f2;
+		--muted: #98989d;
+		--border: #333336;
+		--ok: #37c05a;
+		--warn: #e2a03f;
+		--error: #ff6b60;
+		--accent: #4c9bf5;
+		--row-alt: rgba(255, 255, 255, 0.04);
+	}
+}
+
+:root[data-theme="dark"] {
+	--bg: #121214;
+	--panel: #1c1c1e;
+	--text: #f2f2f2;
+	--muted: #98989d;
+	--border: #333336;
+	--ok: #37c05a;
+	--warn: #e2a03f;
+	--error: #ff6b60;
+	--accent: #4c9bf5;
+	--row-alt: rgba(255, 255, 255, 0.04);
+}
+
+* {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background: var(--bg);
+	color: var(--text);
+	font: 0.85rem/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	display: flex;
+	flex-direction: column;
+	min-height: 100vh;
+}
+
+header {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.6rem 1rem;
+	background: var(--panel);
+	border-bottom: 1px solid var(--border);
+	position: sticky;
+	top: 0;
+	z-index: 10;
+}
+
+h1 {
+	font-size: 0.95rem;
+	font-weight: 600;
+	margin: 0;
+	letter-spacing: -0.01em;
+}
+
+h1 span {
+	color: var(--muted);
+	font-weight: 400;
+}
+
+.spacer {
+	flex: 1;
+}
+
+/* Idle is the same lamp at rest -- dimmed, not a different colour, so
+ * a blink brightens rather than switching identity. */
+.led {
+	width: 0.6rem;
+	height: 0.6rem;
+	border-radius: 50%;
+	background: var(--led-color, var(--muted));
+	box-shadow: 0 0 5px 1px var(--led-glow, transparent);
+	transition: box-shadow 90ms linear, filter 90ms linear;
+	filter: brightness(0.8);
+	display: inline-block;
+}
+
+.led.lit {
+	filter: brightness(1.4);
+	box-shadow: 0 0 6px 2px var(--led-color, var(--muted));
+}
+
+.leds {
+	display: flex;
+	align-items: center;
+	gap: 0.35rem;
+	color: var(--muted);
+	font-size: 0.72rem;
+}
+
+button {
+	font: inherit;
+	color: var(--text);
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	padding: 0.3rem 0.7rem;
+	cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+	border-color: var(--accent);
+	color: var(--accent);
+}
+
+button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+input {
+	font: inherit;
+	color: var(--text);
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	padding: 0.3rem 0.6rem;
+}
+
+input:focus {
+	outline: none;
+	border-color: var(--accent);
+}
+
+main {
+	flex: 1;
+	padding: 1rem;
+	display: flex;
+	flex-direction: column;
+	gap: 1rem;
+	max-width: 1400px;
+	width: 100%;
+	margin: 0 auto;
+}
+
+.cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 0.75rem;
+}
+
+.card {
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	padding: 0.75rem 0.9rem;
+}
+
+.card .label {
+	color: var(--muted);
+	font-size: 0.72rem;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.card .value {
+	font-size: 1.35rem;
+	font-weight: 600;
+	letter-spacing: -0.02em;
+	margin-top: 0.15rem;
+}
+
+.card .sub {
+	color: var(--muted);
+	font-size: 0.72rem;
+}
+
+.panel {
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: 6px;
+	overflow: hidden;
+}
+
+.panel-head {
+	display: flex;
+	align-items: center;
+	gap: 0.6rem;
+	padding: 0.6rem 0.9rem;
+	border-bottom: 1px solid var(--border);
+	flex-wrap: wrap;
+}
+
+.panel-head h2 {
+	font-size: 0.8rem;
+	font-weight: 600;
+	margin: 0;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+	color: var(--muted);
+}
+
+.table-wrap {
+	overflow-x: auto;
+}
+
+table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 0.8rem;
+}
+
+th {
+	text-align: left;
+	font-weight: 600;
+	color: var(--muted);
+	padding: 0.45rem 0.9rem;
+	border-bottom: 1px solid var(--border);
+	white-space: nowrap;
+	font-size: 0.72rem;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+}
+
+td {
+	padding: 0.4rem 0.9rem;
+	border-bottom: 1px solid var(--border);
+	white-space: nowrap;
+}
+
+tbody tr:nth-child(even) {
+	background: var(--row-alt);
+}
+
+td.num {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+.mono {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 0.75rem;
+}
+
+.digest {
+	color: var(--muted);
+	cursor: pointer;
+}
+
+.digest:hover {
+	color: var(--accent);
+}
+
+.badge {
+	display: inline-block;
+	padding: 0.05rem 0.4rem;
+	border-radius: 4px;
+	font-size: 0.68rem;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.03em;
+	border: 1px solid currentColor;
+}
+
+.badge-images {
+	color: var(--accent);
+}
+
+.badge-packages {
+	color: var(--muted);
+}
+
+.pill {
+	font-size: 0.72rem;
+	color: var(--muted);
+}
+
+.pill strong {
+	color: var(--text);
+	font-weight: 600;
+}
+
+.pill.ok strong {
+	color: var(--ok);
+}
+
+.pill.warn strong {
+	color: var(--warn);
+}
+
+footer {
+	border-top: 1px solid var(--border);
+	background: var(--panel);
+	padding: 0.35rem 1rem;
+	color: var(--muted);
+	font-size: 0.72rem;
+	display: flex;
+	gap: 0.75rem;
+	align-items: center;
+}
+
+#log {
+	max-height: 8rem;
+	overflow-y: auto;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 0.72rem;
+	padding: 0.5rem 0.9rem;
+}
+
+#log div {
+	white-space: pre-wrap;
+	word-break: break-all;
+}
+
+#log .err {
+	color: var(--error);
+}
+
+#log .ok {
+	color: var(--ok);
+}
+
+.empty {
+	padding: 1.5rem 0.9rem;
+	color: var(--muted);
+	text-align: center;
+}
+
+.note {
+	color: var(--muted);
+	font-size: 0.72rem;
+	padding: 0.5rem 0.9rem;
+	border-top: 1px solid var(--border);
+}

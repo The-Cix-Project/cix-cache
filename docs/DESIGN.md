@@ -1,7 +1,11 @@
 # cixcache — a push/pull binary artifact registry for Cix
 
-**Status:** proposal, not built. This directory currently holds a static
-export produced by hand; that export is the thing this design replaces.
+**Status:** built. `cixcached`, `cixcachectl` and the dashboard implement
+this design; the hand-made static export it describes has been migrated
+into the content-addressed store. The decisions taken while implementing
+it -- and the two places reality differed from this brief -- are recorded
+in `docs/adr/`. This document is kept as written, as the reasoning that
+produced the system.
 
 **Read this first if you are picking the project up cold.** It is written
 to be self-contained: it states the constraints that are not negotiable,

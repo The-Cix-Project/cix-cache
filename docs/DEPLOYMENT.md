@@ -1,61 +1,111 @@
-# Deployment Guide
+# Deploying cix-cache
 
-## Running the Artifact Server
+## Running the server
 
-### Local/LAN Testing
-```bash
-cd /path/to/cix-cache
-python3 -m http.server 8080 --bind <lan-ip>
+```
+build/cixcached --root=cache --bind=0.0.0.0 --port=8080 --web-root=web
 ```
 
-### Configure Cix Hosts to Use This Registry
+Options may also come from a key=value config file, which command-line
+flags then override:
 
-On each Cix host that will consume artifacts:
+```
+# /etc/cixcache.conf
+root=/var/lib/cixcache
+bind=0.0.0.0
+port=8080
+web_root=/usr/share/cixcache/web
+push_token=<a long random string>
+pull_token=
+```
 
-```bash
-# Point the host at this registry
-cixctl --host=<newbox> pkg artifact-config set --base-url=http://<lan-ip>:8080
+```
+build/cixcached --config=/etc/cixcache.conf
+```
 
-# Point the host at the recipes in git
+`pull_token` empty means pull is open. **Set `push_token`.** Pull may be
+open because consumers verify every byte against a checksum from git; an
+open push lets anyone fill the disk. The dashboard shows `push: OPEN` in a
+warning colour when it is unset.
+
+There is no TLS here, by design — the registry is not a trust boundary
+(`docs/adr/0002-...`). Put it behind a reverse proxy if you want transport
+encryption, but note the daemon will not carry a bearer token across a
+cross-host redirect.
+
+## Pointing a Cix host at it
+
+The recipes and the binaries are two independent URLs. That separation is
+the security model, not a filing convention.
+
+```
+# the binaries -- this server
+cixctl --host=<newbox> pkg artifact-config set --url=http://<lan-ip>:8080
+
+# the recipes -- git, separately
 cixctl --host=<newbox> pkg repo-config set --repo-url=https://git.home.arpa/itdlabs/cix.git
-
-# Sync package metadata
 cixctl --host=<newbox> pkg sync
 
-# Apply an image recipe (pulls pre-built rootfs, no compilation)
+# apply an image recipe: pulls the whole rootfs, compiles nothing
 cixctl --host=<newbox> image apply-recipe gcc-tcc-bootstrap
 ```
 
-## Security Model
+Add `--token=<push_token>` to `artifact-config set` if `pull_token` is set.
 
-- **Registry is NOT a trust boundary** — it serves opaque bytes only
-- **Recipes are in git** — versioned, reviewable, immutable
-- **Checksums validate artifacts** — each recipe's `image_artifact_sha256` or `pkg_artifact_sha256` validates the downloaded binary
-- **Separation of concerns** — this design ensures the registry cannot be exploited to inject malicious code
+## Migrating a static export
 
-See `docs/DESIGN.md` for full architectural rationale and constraints.
+A hand-built export (plain tarballs under `packages/` and `images/`) is
+converted in place into the content-addressed store. Everything is on one
+filesystem, so this is `rename()` only and the bytes are never copied.
 
-## Push Capability (Planned)
-
-Future versions will support builders pushing new artifacts via `PUT`:
-```bash
-PUT /artifacts/<name>-<version>.tar.gz
-PUT /artifacts/images/<name>-<hash>.tar.gz
-HEAD /artifacts/<name>-<version>.tar.gz  # Check if already exists
+```
+build/cixcached --root=cache --import --dry-run     # report, change nothing
+build/cixcached --root=cache --import               # do it
 ```
 
-## Contents
+The import is idempotent — an entry that is already a symlink is skipped,
+so an interrupted run resumes. Where the shipped `MANIFEST.json` records a
+digest, the computed digest is compared against it and any disagreement is
+reported and the file left alone. That is the last moment the export's own
+record can be checked against its bytes.
 
-- `cache/images/` — 5 whole-image rootfs artifacts (3.6 GB)
-  - `cix-builder` — complete build environment with GCC 16.2.0-11
-  - `cix-hosttools` — minimal host tools
-  - `dev` — development environment
-  - `gcc-tcc-bootstrap` — bootstrap GCC self-hosted from TCC (no external compiler)
-  - `jumpbox` — standalone utility container
+It can also be triggered over REST, which is what `cixcachectl import` does:
 
-- `cache/packages/` — 66 individual package artifacts (912 MB)
-  - Core tools: bash, coreutils, grep, sed, make, etc.
-  - Compilers: gcc, binutils, tcc
-  - Libraries: openssl, curl, zlib, libc-dev, etc.
+```
+cixcachectl import --token=<push_token>
+cixcachectl import-status
+```
 
-All artifacts are listed in `MANIFEST.json` with version, size, and SHA256.
+## Operating
+
+```
+cixcachectl status                        # store and server summary
+cixcachectl ls                            # every published artifact
+cixcachectl manifest                      # MANIFEST.json, generated live
+cixcachectl gc --dry-run                  # what collection would remove
+cixcachectl gc --token=<t>                # remove unreferenced blobs
+cixcachectl rm NAME --token=<t>           # unpublish a name
+cixcachectl put FILE --name=N --sha256=H --token=<t> [--images]
+```
+
+`rm` unpublishes a name; the blob survives until collected. A push whose
+body does not match its declared `X-Cix-Sha256` is refused with 400, and
+republishing a name with *different* bytes is refused with 409 — a recipe
+version is immutable, so a published name may only ever mean one byte
+sequence.
+
+## Verifying a deployment
+
+```
+# the URL shape a host actually uses
+curl -fsSL http://<host>:8080/bash-5.2.37-2.tar.gz | sha256sum
+
+# should equal the recipe's pkg_artifact_sha256
+```
+
+For an image, the filename's hash is the sha256 of the sorted
+`name@version,…` manifest string from the recipe, with no trailing newline:
+
+```
+printf '%s' 'bash@5.2.37,bc@1.08.1,...,zlib@1.3.2-3' | sha256sum
+```

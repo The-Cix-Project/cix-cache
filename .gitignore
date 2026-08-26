@@ -1,6 +1,15 @@
-# Binary artifacts - served by registry, not versioned
-cache/images/*.tar.gz
+# The artifact store. Binaries live in the registry, never in git --
+# that separation is the security model, not a size decision: recipes
+# are reviewable text in the Cix repository, artifacts are opaque bytes
+# here, and the recipe's checksum is what approves them.
+cache/blobs/
+cache/tmp/
 cache/packages/*.tar.gz
+cache/images/*.tar.gz
+cache/*.tar.gz
+
+# Build output
+build/
 
 # System files
 *.swp
@@ -9,6 +18,4 @@ cache/packages/*.tar.gz
 .DS_Store
 .vscode/
 .idea/
-
-# Logs
 *.log

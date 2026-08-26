@@ -1,87 +1,89 @@
-# export-artifacts — images pulled off a running Cix host
+# cix-cache — a push/pull binary artifact registry for Cix
 
-Whole-image rootfs artifacts extracted from 192.168.15.95, so a new host
-can install them instead of rebuilding from source. Gitignored: this is
-compiled output, hundreds of MB to GB.
+`cixcached` serves precompiled Cix artifacts over the exact URLs an
+unmodified Cix host already requests, so a new box can install packages and
+whole images instead of rebuilding them from source.
 
-## Layout
+It ships with `cixcachectl` (a REST client) and a web dashboard.
 
-`packages/<name>-<version>.tar.gz` — individual package artifacts, in
-ADR-0122's package-tier shape. A consuming host fetches
-`<base_url>/<name>-<version>.tar.gz`, so any package can be installed
-into any image without compiling -- not just the whole images below.
+```
+build/cixcached --root=cache --bind=0.0.0.0 --port=8080
+```
 
-`images/<name>-<image_version>.tar.gz` — exactly the filename an
-importing host computes for the image-artifact fast path (ADR-0123):
-it fetches `<base_url>/images/<name>-<hash>.tar.gz`, verifies it against
-the recipe's own `image_artifact_sha256`, and extracts it as that
-image's entire rootfs. So this directory can be served as-is, with no
-translation step.
+## What it serves
 
-`MANIFEST.json` — each image's version, artifact sha256 and size. The
-sha256 is what an image recipe's `image_artifact_sha256=` must contain.
+| Purpose | Request |
+|---|---|
+| package artifact | `GET <base>/<name>-<version>.tar.gz` |
+| image artifact | `GET <base>/images/<name>-<hash>.tar.gz` |
+| publish | `PUT` on either, with `X-Cix-Sha256` |
+| existence probe | `HEAD` on either |
+| auth | `Authorization: Bearer <token>` |
 
-## What is here, and what is deliberately NOT
+`<hash>` is not a label. It is the sha256 of the image's sorted
+`name@version,…` manifest string, computed on the host from recipe text
+alone — so the URL is derivable before the artifact exists. `test_contract`
+re-derives it independently and checks it against a version captured from a
+live host.
 
-Binaries only. Every artifact in this directory is opaque bytes that
-some recipe elsewhere vouches for.
+Everything else is for people: `/` is the dashboard, `/api/v1/*` is
+observability, and `/MANIFEST.json` is generated from the tree on request.
+Artifact paths are the only ones ending `.tar.gz`, so the two namespaces
+cannot collide.
 
-The recipes themselves live in the repository (`recipes/image/*` and
-`recipes/package/*`) and are NOT served from here. That separation is
-ADR-0122's two-URL split and it is the whole security model:
+## The invariant
 
-  1. the recipe comes from git -- versioned, reviewable, diffable text
-  2. the artifact comes from a plain HTTP server -- this directory
-  3. the recipe's own checksum validates the artifact
+The registry is **never a trust boundary**, and it is a **cache, never a
+catalogue**.
 
-so the artifact server is never a trust boundary. A server that shipped
-both the payload and the checksum that approves it would be vouching for
-itself, which is worth nothing.
+1. the recipe comes from git — versioned, reviewable text;
+2. the artifact comes from here — opaque bytes;
+3. the recipe's own checksum validates the artifact.
 
-## Provisioning a new host
+So no Cix host code path may ever consult the listing API. A host fetches
+one exact name it already learned from a recipe, and verifies the bytes
+itself. Losing this store entirely must cost rebuild time and nothing else.
 
-    # 1. serve THIS directory (binaries) from a machine the box can reach
-    cd export-artifacts && python3 -m http.server 8080 --bind <lan-ip>
+**Recipes must never be served from here.** That is the one change that
+silently destroys the model, and it has already been attempted once — the
+image recipes were originally generated into this directory, next to the
+binaries they validate. See `docs/adr/0002-registry-is-a-cache-not-a-catalogue.md`.
 
-    # 2. point the box at the binaries...
-    cixctl --host=<newbox> pkg artifact-config set --base-url=http://<lan-ip>:8080
+## Store layout
 
-    # 3. ...and, separately, at the recipes in git
-    cixctl --host=<newbox> pkg repo-config set --repo-url=https://git.home.arpa/itdlabs/cix.git
-    cixctl --host=<newbox> pkg sync
+```
+cache/
+  blobs/<sha256>                    the bytes, mode 0444
+  packages/<name>-<version>.tar.gz  -> ../blobs/<sha256>
+  images/<name>-<hash>.tar.gz       -> ../blobs/<sha256>
+  tmp/                              upload staging
+```
 
-    # 4. apply an image recipe -- it pulls the whole rootfs and compiles nothing
-    cixctl --host=<newbox> image apply-recipe gcc-tcc-bootstrap
+The symlink target *is* the digest, so a name's checksum and size are known
+without an index that could drift and without re-reading the file.
+Duplicate content costs one blob. The server maps URLs onto this layout,
+which is what lets packages be served flat at the root while images sit
+under `images/`.
 
-## Serving it
+## Building
 
-    cd export-artifacts && python3 -m http.server 8080 --bind <lan-ip>
+TCC only, dynamically linked against system glibc:
 
-Then on the importing host:
+```
+make          # cixcached, cixcachectl, and the tests
+make clean
+```
 
-    cixctl --host=<newbox> pkg artifact-config set --base-url=http://<lan-ip>:8080
+Tests are standalone binaries run by hand, against a real server on a
+dedicated port:
 
-## How these were extracted
+```
+for t in store http manifest import serve push gc contract; do build/test_$t; done
+```
 
-The host's own export endpoint could not be used: `tar -z` shells out to
-a bare `gzip` through PATH, and the daemon runs as PID 1 with no PATH
-(issue #125), so every host-side compress fails. Extraction instead ran
-tar *inside a container* built from each image -- where PATH is normal --
-split the result into bounded chunks, and pulled each chunk through
-`GET /containers/{name}/files`. Purely REST, no shell on the host.
+## Documentation
 
-Images lacking a shell or archiver were handled two ways: `tar`/`bash`
-was installed into them first (`jumpbox`, `cix-hosttools`, `dev`), or --
-where the image had no tooling at all and its packages were small
-(`dns`, `syslog`, `ldap`, `chrony`, `auditbuild`) -- each recorded file
-was pulled individually through the same files endpoint, which needs
-nothing inside the image.
-
-Per-package artifacts were then derived LOCALLY from the image
-tarballs using each package's own recorded file list, so no package
-needed a second trip to the host.
-
-Not included: `auditbuild`'s `ncurses@6.6-5` and `libc-dev@2.36-4`
-(10,670 files between them, and both are duplicate revisions of
-versions already here), and the `__hostbuild` entries, which are this
-project's own build outputs rather than installable packages.
+- `docs/DESIGN.md` — the original design brief and its reasoning
+- `docs/DEPLOYMENT.md` — running it, and pointing hosts at it
+- `docs/adr/` — why the store, the reactor and the push protocol are shaped
+  the way they are

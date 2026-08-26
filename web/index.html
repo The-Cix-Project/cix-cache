@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cix-cache</title>
+<link rel="stylesheet" href="/style.css">
+<script>
+/*
+ * Applied before first paint, inline and synchronous, so a dark-theme
+ * viewer never sees a white flash while app.js is still loading.
+ */
+(function () {
+	try {
+		var t = localStorage.getItem("cixcache-theme");
+		if (t === "light" || t === "dark")
+			document.documentElement.setAttribute("data-theme", t);
+	} catch (e) {
+		/* private mode or site data blocked -- fall through to system */
+	}
+})();
+</script>
+</head>
+<body>
+<header>
+	<h1>cix-cache <span>artifact registry</span></h1>
+	<span class="pill" id="pill-reach">connecting&hellip;</span>
+	<span class="spacer"></span>
+	<span class="pill" id="pill-pull"></span>
+	<span class="pill" id="pill-push"></span>
+	<span class="leds">
+		<span class="led" id="led-tx" style="--led-color: var(--accent)"></span>TX
+		<span class="led" id="led-rx" style="--led-color: var(--ok)"></span>RX
+	</span>
+	<button id="theme-toggle" title="Toggle light and dark">theme</button>
+</header>
+
+<main>
+	<section class="cards">
+		<div class="card">
+			<div class="label">Packages</div>
+			<div class="value" id="stat-packages">&mdash;</div>
+			<div class="sub" id="stat-package-bytes">&nbsp;</div>
+		</div>
+		<div class="card">
+			<div class="label">Images</div>
+			<div class="value" id="stat-images">&mdash;</div>
+			<div class="sub" id="stat-image-bytes">&nbsp;</div>
+		</div>
+		<div class="card">
+			<div class="label">Served</div>
+			<div class="value" id="stat-served">&mdash;</div>
+			<div class="sub" id="stat-requests">&nbsp;</div>
+			<div class="sub" id="stat-hitmiss">&nbsp;</div>
+		</div>
+		<div class="card">
+			<div class="label">Uptime</div>
+			<div class="value" id="stat-uptime">&mdash;</div>
+			<div class="sub" id="stat-build">&nbsp;</div>
+		</div>
+	</section>
+
+	<section class="panel">
+		<div class="panel-head">
+			<h2>Artifacts</h2>
+			<input id="filter" type="search" placeholder="filter by name or digest" size="28">
+			<button data-tier="" class="tier-btn">all</button>
+			<button data-tier="images" class="tier-btn">images</button>
+			<button data-tier="packages" class="tier-btn">packages</button>
+			<span class="spacer"></span>
+			<span class="pill" id="artifact-count"></span>
+		</div>
+		<div class="table-wrap">
+			<table>
+				<thead>
+					<tr>
+						<th>Tier</th>
+						<th>Name</th>
+						<th>sha256</th>
+						<th class="num">Size</th>
+						<th>URL</th>
+					</tr>
+				</thead>
+				<tbody id="artifact-rows"></tbody>
+			</table>
+		</div>
+		<div class="empty" id="artifact-empty" hidden>No artifacts published.</div>
+		<p class="note">
+			This listing is for operators. No Cix host ever consults it &mdash; a host
+			fetches one exact artifact URL and verifies the bytes against the checksum
+			in its recipe, which lives in git, not here. The registry is a cache, never
+			a catalogue.
+		</p>
+	</section>
+
+	<section class="panel">
+		<div class="panel-head">
+			<h2>Maintenance</h2>
+			<input id="token" type="password" placeholder="push token" size="20">
+			<button id="btn-gc-dry">gc dry-run</button>
+			<button id="btn-gc">collect</button>
+			<button id="btn-import">import export tree</button>
+			<span class="spacer"></span>
+			<span class="pill" id="import-state"></span>
+		</div>
+		<div id="log"></div>
+	</section>
+</main>
+
+<footer>
+	<span id="foot-root">&nbsp;</span>
+	<span class="spacer"></span>
+	<span id="foot-version">&nbsp;</span>
+</footer>
+
+<script src="/app.js"></script>
+</body>
+</html>
