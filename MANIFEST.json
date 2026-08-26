@@ -1,0 +1,366 @@
+{
+  "images": {
+    "cix-builder": {
+      "version": "cf38daf76730449b147d32d0b919a70e4069c83cae417057cf1885978c0009ec",
+      "file": "images/cix-builder-cf38daf76730449b147d32d0b919a70e4069c83cae417057cf1885978c0009ec.tar.gz",
+      "sha256": "d87e3722db2c896723e5f1be7e1eb2414c111190ea5a384e05506a7abc176de9",
+      "bytes": 2883276410
+    },
+    "cix-hosttools": {
+      "version": "e5521e540229b2c1e5f7db79e5a16565e1d3bfa3fbbcbc52a7bda4eec2bde5f2",
+      "file": "images/cix-hosttools-e5521e540229b2c1e5f7db79e5a16565e1d3bfa3fbbcbc52a7bda4eec2bde5f2.tar.gz",
+      "sha256": "643b737ccd3a35765ca262a64d62170f5509f04053c3bca95cc51fa2aa54ef95",
+      "bytes": 42833816
+    },
+    "dev": {
+      "version": "3a9b50b85a2333e0e60c80c1c441000f0bbd6b8c8f1434ae77095919b8b6f2da",
+      "file": "images/dev-3a9b50b85a2333e0e60c80c1c441000f0bbd6b8c8f1434ae77095919b8b6f2da.tar.gz",
+      "sha256": "11110fe3361ae7ea667938f8ce1a4714a24461b4d2a11b8ed0e9a045b3e1ad91",
+      "bytes": 345020771
+    },
+    "gcc-tcc-bootstrap": {
+      "version": "739bcfc6e7d7e464f0cf1801bf744a502719103387fcdcb304b38fb0830d0ad9",
+      "file": "images/gcc-tcc-bootstrap-739bcfc6e7d7e464f0cf1801bf744a502719103387fcdcb304b38fb0830d0ad9.tar.gz",
+      "sha256": "48200fa6e4e694bf8c9b507ee4be74e1cf5a10e253fc2496b782d2d4f46c623a",
+      "bytes": 515150171
+    },
+    "jumpbox": {
+      "version": "fe565aafb02a558ce244ea0976a8f6cc75e30fd6eacaec04b591a95bc0b462e0",
+      "file": "images/jumpbox-fe565aafb02a558ce244ea0976a8f6cc75e30fd6eacaec04b591a95bc0b462e0.tar.gz",
+      "sha256": "ed6ad5168fbd36ad20162acbfafe037ef5752af0a0aab73c9cc3b464194b8bbd",
+      "bytes": 63878128
+    }
+  },
+  "packages": {
+    "bash-5.2.37-2": {
+      "file": "packages/bash-5.2.37-2.tar.gz",
+      "sha256": "47f08a7eac65b59ce6e6a211ffcf77545993f4b5c52c094dbd79ec367f08bd14",
+      "bytes": 3865504
+    },
+    "bash-5.2.37": {
+      "file": "packages/bash-5.2.37.tar.gz",
+      "sha256": "3b99b05224ca918da0088d8641357abd23ff1d921b132d2c9733b740e32e4328",
+      "bytes": 3865449
+    },
+    "bc-1.08.1-2": {
+      "file": "packages/bc-1.08.1-2.tar.gz",
+      "sha256": "b99c7d28980578c2aef5dd447ae0f75c590375329b4c8fa127920456194ebb7f",
+      "bytes": 137115
+    },
+    "bc-1.08.1": {
+      "file": "packages/bc-1.08.1.tar.gz",
+      "sha256": "4fc977d6e5c033e7e0b08a53f643d7442b962bb2419b039b1227a46c73baa988",
+      "bytes": 137125
+    },
+    "binutils-2.42-2": {
+      "file": "packages/binutils-2.42-2.tar.gz",
+      "sha256": "0f2178591e217ca93b8cd6d15853c115be5635078450b58a2be1a3d7033b7e1a",
+      "bytes": 19224079
+    },
+    "binutils-2.42-7": {
+      "file": "packages/binutils-2.42-7.tar.gz",
+      "sha256": "ed300516eb531e7247792e251adaf3a8a538dc71f7e2ea9483372c4633844ebe",
+      "bytes": 19242178
+    },
+    "binutils-2.42-8": {
+      "file": "packages/binutils-2.42-8.tar.gz",
+      "sha256": "0c73710eab1a4896efa2b8fd0cca503843bcfe80a0a1ebc702ad017eab9b7f27",
+      "bytes": 57013988
+    },
+    "bison-3.8.2-2": {
+      "file": "packages/bison-3.8.2-2.tar.gz",
+      "sha256": "98fb980c29582aea513e0e862d0c8c1eb78091809e9dc4b7095492cd6a372bf5",
+      "bytes": 634425
+    },
+    "bzip2-1.0.8": {
+      "file": "packages/bzip2-1.0.8.tar.gz",
+      "sha256": "94057e0f7d43c131b3db7fc94c6a8db6353f276270b8ec44a5f1e49c5a877a8a",
+      "bytes": 57314
+    },
+    "chrony-4.8": {
+      "file": "packages/chrony-4.8.tar.gz",
+      "sha256": "19f02189174d32d80699494890f92ee5e31039883f7a5a3c2c32ae89001fe2f2",
+      "bytes": 518677
+    },
+    "coreutils-9.11-3": {
+      "file": "packages/coreutils-9.11-3.tar.gz",
+      "sha256": "f040e943e222849b9b8b405c16d1abeebf238544c9905328173c2f3ad4fb1009",
+      "bytes": 6205726
+    },
+    "coreutils-9.11": {
+      "file": "packages/coreutils-9.11.tar.gz",
+      "sha256": "c7b38545eecbf09b565395927b253476c8b7aa7925e9e833a5bee781507860ab",
+      "bytes": 6395654
+    },
+    "curl-8.21.0": {
+      "file": "packages/curl-8.21.0.tar.gz",
+      "sha256": "e27e2f8c901ec2d5fdffe6eb7ba64b009e61ca06408f8449f2919e42b14f16ea",
+      "bytes": 551405
+    },
+    "dhcpcd-10.5.2-5": {
+      "file": "packages/dhcpcd-10.5.2-5.tar.gz",
+      "sha256": "b985187524896c82171f6d227128c1250aa87350d3c73476dbbc5745eebeff58",
+      "bytes": 116096
+    },
+    "diffutils-3.10-5": {
+      "file": "packages/diffutils-3.10-5.tar.gz",
+      "sha256": "fa6edce530fe074b30eadbaaad67759d111798afd81201d9f6974f2c0a940143",
+      "bytes": 474954
+    },
+    "dnsmasq-2.90": {
+      "file": "packages/dnsmasq-2.90.tar.gz",
+      "sha256": "a697ece459bca5a178bad3532174b0aecaf2d48c99b47234c85845ec88223cd0",
+      "bytes": 217608
+    },
+    "elfutils-0.192-6": {
+      "file": "packages/elfutils-0.192-6.tar.gz",
+      "sha256": "383d042799208e8daf73ab583d38615f6b526d49178e2a0e681b4b95d0e10354",
+      "bytes": 1158229
+    },
+    "findutils-4.10.0-3": {
+      "file": "packages/findutils-4.10.0-3.tar.gz",
+      "sha256": "3753c09ea23ec35c365c26a2f0b0f5b03fea4722dc6f31d6bf7858ad14674ce2",
+      "bytes": 324791
+    },
+    "flex-2.6.4-2": {
+      "file": "packages/flex-2.6.4-2.tar.gz",
+      "sha256": "956c62c65e3befad1c725c98032cd63aa7e167598a7be3e12ffaaace155fe6bd",
+      "bytes": 301371
+    },
+    "flex-2.6.4-4": {
+      "file": "packages/flex-2.6.4-4.tar.gz",
+      "sha256": "42cfe538d5f73bd717c1f31c2fabcf2939c02d9388d3342b11981b7e8e56d343",
+      "bytes": 301378
+    },
+    "gawk-5.3.0-2": {
+      "file": "packages/gawk-5.3.0-2.tar.gz",
+      "sha256": "37c711a5c76d2510fc3d204a8c7e39589524e662c5df4cec33c1a583dca0888b",
+      "bytes": 1588458
+    },
+    "gcc-16.2.0-11": {
+      "file": "packages/gcc-16.2.0-11.tar.gz",
+      "sha256": "a80cea83774520fe739c3e8250f86d4c24ab7a9beead484dcbbcef46340f13b4",
+      "bytes": 462226059
+    },
+    "gcc-9.5.0-6": {
+      "file": "packages/gcc-9.5.0-6.tar.gz",
+      "sha256": "3fd84ac5d0ad6308e6e916f0f92dc14b09c638091977ff3050a79ac708b7e486",
+      "bytes": 274255882
+    },
+    "glauth-2.4.0": {
+      "file": "packages/glauth-2.4.0.tar.gz",
+      "sha256": "c0c5565bd2bf8b9be2f4e374f01e72eb8c3db6cfed703a01dc249c2b87106cbb",
+      "bytes": 13243001
+    },
+    "grep-3.11-2": {
+      "file": "packages/grep-3.11-2.tar.gz",
+      "sha256": "276f2944b2fd22d0b51aab5a3929fbc08877bbbab74b9a2adfabb4b5db7e46a7",
+      "bytes": 128305
+    },
+    "grep-3.11-3": {
+      "file": "packages/grep-3.11-3.tar.gz",
+      "sha256": "cc766c540e2dfe273304ce269cb066ab603845106d2f15e141ee027f38765822",
+      "bytes": 128341
+    },
+    "gzip-1.13-2": {
+      "file": "packages/gzip-1.13-2.tar.gz",
+      "sha256": "7a658d07ff088c53a89611f0a05674d1a9da21c6d0a2d8dd309c4f568532dccd",
+      "bytes": 125870
+    },
+    "gzip-1.13": {
+      "file": "packages/gzip-1.13.tar.gz",
+      "sha256": "0e6ab1f0be10126a8a6228262f4c336e8919499ff90cc7fe683b4891b17c76b4",
+      "bytes": 126262
+    },
+    "libc-dev-2.36-3": {
+      "file": "packages/libc-dev-2.36-3.tar.gz",
+      "sha256": "bd952d6a9b360c0c0f294ab538b6666213902ab92829d1d5d25db2ad33769bb8",
+      "bytes": 17397073
+    },
+    "libc-dev-2.36": {
+      "file": "packages/libc-dev-2.36.tar.gz",
+      "sha256": "72aca4c8db2ad165773e89512d02a2749b1310c96a70ad38b0caad30cc3e5384",
+      "bytes": 15371753
+    },
+    "libcap-2.78-4": {
+      "file": "packages/libcap-2.78-4.tar.gz",
+      "sha256": "f7cf4077006754fead93213137ee06678ebbca5123bd354284aa95c9853c337e",
+      "bytes": 88220
+    },
+    "libuuid-2.42.2": {
+      "file": "packages/libuuid-2.42.2.tar.gz",
+      "sha256": "59782eddb4974c49c12160f67a93cd46999a9eee8cf6f250dd8660256786d77f",
+      "bytes": 92332
+    },
+    "linux-pam-1.6.1-2": {
+      "file": "packages/linux-pam-1.6.1-2.tar.gz",
+      "sha256": "d77fe6e76248bcb54649f237065435fef75ac2544a31276d619dbb67b47039eb",
+      "bytes": 352368
+    },
+    "m4-1.4.19-2": {
+      "file": "packages/m4-1.4.19-2.tar.gz",
+      "sha256": "53a36b7e7653a0ec60bce72be01be534c82d83b261edd88bd58a1bc9bd2b8a45",
+      "bytes": 301815
+    },
+    "m4-1.4.19": {
+      "file": "packages/m4-1.4.19.tar.gz",
+      "sha256": "4655d6eec5f98af70ef9631f76b31c4120dcf44dd6cddba926636682af0fcbf3",
+      "bytes": 302880
+    },
+    "make-4.4.1-3": {
+      "file": "packages/make-4.4.1-3.tar.gz",
+      "sha256": "dfd2136d27b1ea7b0f804a16f4d6f0c8a19172bbb6828007c2b073e8ab22fef1",
+      "bytes": 257132
+    },
+    "make-4.4.1": {
+      "file": "packages/make-4.4.1.tar.gz",
+      "sha256": "29860a5f082bf1de4c0e30d6571c2cf1a5ec3e32c492959d3fc8a143d85055fd",
+      "bytes": 257136
+    },
+    "mtr-0.96-3": {
+      "file": "packages/mtr-0.96-3.tar.gz",
+      "sha256": "bf5801e2e18ea9472f72f77ee597e9892c5096b83734d9724808a13943362bb9",
+      "bytes": 141682
+    },
+    "ncurses-6.6": {
+      "file": "packages/ncurses-6.6.tar.gz",
+      "sha256": "c8ace3b85a940ab2022b65618d78a11ff2afcf72938d692ad720375bbeffbc57",
+      "bytes": 1635697
+    },
+    "nss-pam-ldapd-0.9.13-2": {
+      "file": "packages/nss-pam-ldapd-0.9.13-2.tar.gz",
+      "sha256": "88b17ff223b2ecaa954fd342c7a9dc70f6d6c0bc54f8dfc6dbd060805ff6ffc7",
+      "bytes": 941774
+    },
+    "openldap-client-2.6.14": {
+      "file": "packages/openldap-client-2.6.14.tar.gz",
+      "sha256": "e4dff14fcc1bd965b56b1a7aeac0cf76d2aab73a9a5408bf181b162ed68ebcc2",
+      "bytes": 2780877
+    },
+    "openssh-10.4p1-8": {
+      "file": "packages/openssh-10.4p1-8.tar.gz",
+      "sha256": "98fdf9d3122edc255ed078e56943dc4482602558254fd7fc72bafcd7c992b486",
+      "bytes": 3265754
+    },
+    "openssl-3.0.20": {
+      "file": "packages/openssl-3.0.20.tar.gz",
+      "sha256": "c6bbc96a41823972560fdfd9833eb78136b4fece7368d70962dcc4d504603b7b",
+      "bytes": 3095452
+    },
+    "patch-2.8-2": {
+      "file": "packages/patch-2.8-2.tar.gz",
+      "sha256": "4661ca25fd43b60c9a157d9a01d2c393b27d9f7d68a8a457ad1a0645b140f99e",
+      "bytes": 240903
+    },
+    "perl-5.40.1": {
+      "file": "packages/perl-5.40.1.tar.gz",
+      "sha256": "7c74e3a2689c9093488ae811578c2e2315b2a56ab60d837d4e42aa1f57bf4acd",
+      "bytes": 17900201
+    },
+    "pkgconf-3.0.5-3": {
+      "file": "packages/pkgconf-3.0.5-3.tar.gz",
+      "sha256": "6b475ddcb70b16ee6146a57cf7b53ee7ebd61493d754991984c0625783a6f553",
+      "bytes": 612298
+    },
+    "procps-4.0.6-6": {
+      "file": "packages/procps-4.0.6-6.tar.gz",
+      "sha256": "1c6d263019dd21c20952111dd3c7e895a8804a285b76353601f4f4d63e45ff86",
+      "bytes": 243311
+    },
+    "psmisc-23.7-1": {
+      "file": "packages/psmisc-23.7-1.tar.gz",
+      "sha256": "5420cf5b52c5e67faee7cd65f2e567f514cb8a355344d2526f175bb05ad3379b",
+      "bytes": 277462
+    },
+    "psmisc-23.7-5": {
+      "file": "packages/psmisc-23.7-5.tar.gz",
+      "sha256": "76c6e03af2217a86aadebe50c7c9cb408d4952f77fc6a62053d58f3f89e43467",
+      "bytes": 247453
+    },
+    "screen-5.0.2": {
+      "file": "packages/screen-5.0.2.tar.gz",
+      "sha256": "749197331f97fd006d39dc1aae6f21892dd60b05e02eac25b701918956f09120",
+      "bytes": 1043139
+    },
+    "sed-4.9-2": {
+      "file": "packages/sed-4.9-2.tar.gz",
+      "sha256": "47a3dfbf8aaeeea594b10cc00d80c1e498986ef268333a2d9378b43386aab340",
+      "bytes": 104106
+    },
+    "sed-4.9-3": {
+      "file": "packages/sed-4.9-3.tar.gz",
+      "sha256": "9b4eecb47d225fc63dad62367df422061176cd6572192e0ff72040a28a351808",
+      "bytes": 104112
+    },
+    "squashfs-tools-4.7.5-5": {
+      "file": "packages/squashfs-tools-4.7.5-5.tar.gz",
+      "sha256": "d79bfaa16928cd234faf7980321f3bec93d28bc56f6fff14d6c2b457d9826bba",
+      "bytes": 223908
+    },
+    "sysklogd-2.7.0": {
+      "file": "packages/sysklogd-2.7.0.tar.gz",
+      "sha256": "5dcd1ba5861d2dc04df13358e84c30007cbee122b200ab0d9222031bf4e5cd24",
+      "bytes": 48724
+    },
+    "tar-1.35-2": {
+      "file": "packages/tar-1.35-2.tar.gz",
+      "sha256": "69d1beea1642feb533bd8f47721e1e6cfc9d3368bcd5850374d41be5ccf4f6a2",
+      "bytes": 623831
+    },
+    "tar-1.35-5": {
+      "file": "packages/tar-1.35-5.tar.gz",
+      "sha256": "f3d4ed863082d1bbbd189e4b0266353f8d7ffb5273c54caaf81a4b5a64402cc2",
+      "bytes": 623998
+    },
+    "tcc-0.9.27-5": {
+      "file": "packages/tcc-0.9.27-5.tar.gz",
+      "sha256": "a04ef53bcc16df3d1ea078b404b3c55181650e363c0fb287bdcf4afce2bcc327",
+      "bytes": 356823
+    },
+    "tcc-0.9.27-7": {
+      "file": "packages/tcc-0.9.27-7.tar.gz",
+      "sha256": "2e9095069725a251dcecadddc89e179f08627728ff13d376510a854e0e6de26d",
+      "bytes": 356768
+    },
+    "tcc-0.9.27": {
+      "file": "packages/tcc-0.9.27.tar.gz",
+      "sha256": "5c18c4aae349c72dd9d2c37100f82dffad2882355ec6e5bbb4c0abeacfda3d52",
+      "bytes": 918662
+    },
+    "vim-9.1.1428": {
+      "file": "packages/vim-9.1.1428.tar.gz",
+      "sha256": "43cb6727961b0207eaa601fadb059c19231ac28ca8e9aee3de35830292d3a0a9",
+      "bytes": 10732667
+    },
+    "xz-5.8.3-2": {
+      "file": "packages/xz-5.8.3-2.tar.gz",
+      "sha256": "f1a665dfaac19eb5310bb6f9361ab73523a98d1085a7cc67150fa5e49734a748",
+      "bytes": 416897
+    },
+    "xz-5.8.3-3": {
+      "file": "packages/xz-5.8.3-3.tar.gz",
+      "sha256": "9187ab8a78634e2aaf82154377df1b3f883d0771fbdce09ce2164044cc432f65",
+      "bytes": 1373701
+    },
+    "zlib-1.3.2-2": {
+      "file": "packages/zlib-1.3.2-2.tar.gz",
+      "sha256": "2c80a816a25ecc3c0e7f1a76bf70a3fab218bda3dd2cf604002519cce37d1fd4",
+      "bytes": 99786
+    },
+    "zlib-1.3.2-3": {
+      "file": "packages/zlib-1.3.2-3.tar.gz",
+      "sha256": "01f762cbfa2f608012d8d753734cb6448142a467ffff53d259827caaf56feb11",
+      "bytes": 100331
+    },
+    "zlib-1.3.2-6": {
+      "file": "packages/zlib-1.3.2-6.tar.gz",
+      "sha256": "81b836e80990b731e9988804596eb7f7b6e7b21032a8fc715d15b2f7014c6f27",
+      "bytes": 95263
+    },
+    "zlib-1.3.2": {
+      "file": "packages/zlib-1.3.2.tar.gz",
+      "sha256": "ff317e0daa44e68a62d0d1c7c33c377070fc82919e069596d42ced7c7bc18fec",
+      "bytes": 97634
+    }
+  }
+}

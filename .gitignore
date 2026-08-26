@@ -1,0 +1,14 @@
+# Binary artifacts - served by registry, not versioned
+cache/images/*.tar.gz
+cache/packages/*.tar.gz
+
+# System files
+*.swp
+*.swo
+*~
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log
