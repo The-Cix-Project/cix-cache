@@ -23,14 +23,6 @@ void http_conn_free(struct http_conn *c)
 
 int http_conn_feed(struct http_conn *c, const char *data, size_t n)
 {
-	/*
-	 * The cap only guards the header section. Once the blank line has
-	 * been seen the caller drains the body itself -- straight to a
-	 * file for a PUT -- and stops feeding, so a 2.7 GB upload never
-	 * touches this buffer.
-	 */
-	if (c->headers_end < 0 && c->len + n > HTTP_MAX_HEADERS)
-		return -1;
 	if (c->len + n + 1 > c->cap) {
 		size_t cap = c->cap != 0 ? c->cap : 4096;
 		char *grown;
@@ -46,6 +38,54 @@ int http_conn_feed(struct http_conn *c, const char *data, size_t n)
 	memcpy(c->buf + c->len, data, n);
 	c->len += n;
 	c->buf[c->len] = '\0';
+
+	/*
+	 * Find the end of the header section here rather than in
+	 * try_parse(), because the cap below has to know where the headers
+	 * actually stop.
+	 *
+	 * This used to test c->len against the cap while headers_end was
+	 * still -1, which it always is on the first feed -- so a request
+	 * whose headers and body landed in one read had its BODY counted
+	 * as header bytes and was rejected with "request headers too
+	 * large" (issue #1). It bracketed strangely: tiny bodies fit under
+	 * the cap and passed, large ones arrived in a separate read from
+	 * the headers and passed, and everything in between failed. A
+	 * 48 KB package artifact could not be published at all, and no
+	 * client-side workaround existed -- padding the tarball would
+	 * change the very checksum its recipe approves.
+	 *
+	 * memmem rather than strstr: once headers and body share the
+	 * buffer, the body is arbitrary binary and a NUL in it would end a
+	 * string search early.
+	 */
+	if (c->headers_end < 0) {
+		const char *blank = memmem(c->buf, c->len, "\r\n\r\n", 4);
+
+		if (blank != NULL)
+			c->headers_end = (int)(blank - c->buf) + 4;
+	}
+	/*
+	 * Two separate limits, and both are needed.
+	 *
+	 * Unterminated: a client that never sends the blank line must not
+	 * be able to grow the buffer without bound, so the accumulated
+	 * bytes are capped while no terminator has been seen.
+	 *
+	 * Terminated: the header region itself must still fit the cap.
+	 * Checking only the first condition would silently raise the real
+	 * limit to whatever arrives in one read -- 12 KB of headers were
+	 * accepted that way while fixing issue #1, since they were
+	 * complete and so never met the unterminated test.
+	 *
+	 * Neither bounds the body. Once the blank line is seen the caller
+	 * drains it straight to a file, so a 2.7 GB upload never touches
+	 * this buffer.
+	 */
+	if (c->headers_end < 0 && c->len > HTTP_MAX_HEADERS)
+		return -1;
+	if (c->headers_end > HTTP_MAX_HEADERS)
+		return -1;
 	return 0;
 }
 
@@ -77,24 +117,22 @@ static int parse_request_line(struct http_conn *c, const char *line, size_t line
 
 int http_conn_try_parse(struct http_conn *c, struct http_request *req)
 {
-	const char *blank;
 	const char *eol;
 	char lenbuf[32];
 	size_t headers_len;
 
-	if (c->headers_end < 0) {
-		if (c->buf == NULL)
-			return 0;
-		blank = strstr(c->buf, "\r\n\r\n");
-		if (blank == NULL)
-			return 0;
-		c->headers_end = (int)(blank - c->buf) + 4;
-		eol = strstr(c->buf, "\r\n");
-		if (eol == NULL)
-			return -1;
-		if (parse_request_line(c, c->buf, (size_t)(eol - c->buf)) != 0)
-			return -1;
-	}
+	/*
+	 * feed() owns finding the terminator; this owns interpreting what
+	 * it delimits. Splitting them that way is what keeps the size cap
+	 * measuring the header region rather than the buffer (issue #1).
+	 */
+	if (c->headers_end < 0)
+		return 0;
+	eol = memmem(c->buf, (size_t)c->headers_end, "\r\n", 2);
+	if (eol == NULL)
+		return -1;
+	if (parse_request_line(c, c->buf, (size_t)(eol - c->buf)) != 0)
+		return -1;
 	headers_len = (size_t)c->headers_end - 4;
 	c->content_length = 0;
 	if (http_find_header(c->buf, headers_len, "Content-Length", lenbuf, sizeof(lenbuf)) >= 0) {

@@ -92,6 +92,36 @@ int main(void)
 	CHECK(put(&ts, a_path, "dev-1.0.tar.gz", a_digest, TOKEN, 1) == 400,
 	      "image name without a manifest hash is refused");
 
+	/*
+	 * Issue #1's bracket, verbatim. Small bodies fit under the header
+	 * cap and passed, large ones arrived in a read of their own and
+	 * passed, and everything between was rejected as "request headers
+	 * too large" -- so 12 of 13 artifacts in a real push run succeeded
+	 * and the 48 KB one could not be published at all.
+	 *
+	 * Whether headers and body actually coalesce here is up to the
+	 * kernel and curl, so this is a bracket rather than a proof; the
+	 * deterministic half lives in test_http.
+	 */
+	{
+		static const long sizes[] = { 1024, 16384, 49152, 65536, 131072, 262144 };
+		char probe[300];
+		char pname[64];
+		char pdigest[128];
+		size_t k;
+
+		snprintf(probe, sizeof(probe), "%s/probe.bin", ts.root);
+		for (k = 0; k < sizeof(sizes) / sizeof(sizes[0]); k++) {
+			char msg[96];
+
+			ts_make_file(probe, sizes[k]);
+			ts_sha256(probe, pdigest, sizeof(pdigest));
+			snprintf(pname, sizeof(pname), "zz-probe-%ld.tar.gz", sizes[k]);
+			snprintf(msg, sizeof(msg), "push a %ld byte body", sizes[k]);
+			CHECK(put(&ts, probe, pname, pdigest, TOKEN, 0) == 201, msg);
+		}
+	}
+
 	/* DELETE unpublishes the name; the blob stays for the collector. */
 	CHECK(ts_status(PORT, "DELETE", "/p-1.0.tar.gz", NULL) == 401, "delete needs a token");
 	CHECK(ts_status(PORT, "DELETE", "/p-1.0.tar.gz", TOKEN) == 204, "delete unpublishes");
