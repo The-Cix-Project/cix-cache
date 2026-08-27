@@ -12,12 +12,62 @@
 #include "json.h"
 
 #include <errno.h>
+#include <time.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+/*
+ * List output goes through the user's pager when stdout is a terminal.
+ * 85 artifacts do not fit on a screen, and a registry only gets more
+ * of them. Redirected or piped output is left completely alone.
+ */
+static FILE *g_out;
+
+static void out_open(int paged)
+{
+	const char *pager;
+
+	g_out = stdout;
+	if (!paged || !isatty(STDOUT_FILENO))
+		return;
+	pager = getenv("PAGER");
+	if (pager == NULL || pager[0] == '\0')
+		pager = "less -FRX";
+	{
+		FILE *p = popen(pager, "w");
+
+		if (p != NULL)
+			g_out = p;
+	}
+}
+
+static void out_close(void)
+{
+	if (g_out != NULL && g_out != stdout)
+		pclose(g_out);
+	g_out = stdout;
+}
+
+/* Bytes a person can read at a glance, not a number they have to count. */
+static void human_bytes(long long n, char *out, size_t out_size)
+{
+	static const char *unit[] = { "B", "K", "M", "G", "T" };
+	double v = (double)n;
+	int i = 0;
+
+	while (v >= 1024.0 && i < 4) {
+		v /= 1024.0;
+		i++;
+	}
+	if (i == 0)
+		snprintf(out, out_size, "%lld%s", n, unit[i]);
+	else
+		snprintf(out, out_size, "%.1f%s", v, unit[i]);
+}
 
 #define DEFAULT_HOST "127.0.0.1"
 #define DEFAULT_PORT 8080
@@ -90,65 +140,105 @@ static int emit(struct cix_response *r, int json_mode, void (*fmt)(const struct 
 
 static void fmt_status(const struct json_value *v)
 {
-	printf("build:     %s (%s)\n", str_field(v, "build_version"), str_field(v, "build_time"));
-	printf("root:      %s\n", str_field(v, "root"));
-	printf("uptime:    %llds\n", int_field(v, "uptime_seconds"));
-	printf("requests:  %lld\n", int_field(v, "requests"));
+	fprintf(g_out, "build:     %s (%s)\n", str_field(v, "build_version"), str_field(v, "build_time"));
+	fprintf(g_out, "root:      %s\n", str_field(v, "root"));
+	fprintf(g_out, "uptime:    %llds\n", int_field(v, "uptime_seconds"));
+	fprintf(g_out, "requests:  %lld\n", int_field(v, "requests"));
 	/*
 	 * Hits and misses separately, because a registry serving the wrong
 	 * paths looks identical to an empty one from the outside: every
 	 * request 404s and every host silently rebuilds from source.
 	 */
-	printf("artifacts: %lld hit, %lld missed\n", int_field(v, "artifact_hits"),
+	fprintf(g_out, "artifacts: %lld hit, %lld missed\n", int_field(v, "artifact_hits"),
 	       int_field(v, "artifact_misses"));
-	printf("served:    %lld bytes\n", int_field(v, "served_bytes"));
-	printf("packages:  %lld (%lld bytes)\n", int_field(v, "packages"), int_field(v, "package_bytes"));
-	printf("images:    %lld (%lld bytes)\n", int_field(v, "images"), int_field(v, "image_bytes"));
-	printf("pull:      %s\n", bool_field(v, "pull_open") ? "open" : "token required");
-	printf("push:      %s\n", bool_field(v, "push_configured") ? "token required" : "OPEN");
+	fprintf(g_out, "served:    %lld bytes\n", int_field(v, "served_bytes"));
+	fprintf(g_out, "packages:  %lld (%lld bytes)\n", int_field(v, "packages"), int_field(v, "package_bytes"));
+	fprintf(g_out, "images:    %lld (%lld bytes)\n", int_field(v, "images"), int_field(v, "image_bytes"));
+	fprintf(g_out, "pull:      %s\n", bool_field(v, "pull_open") ? "open" : "token required");
+	fprintf(g_out, "push:      %s\n", bool_field(v, "push_configured") ? "token required" : "OPEN");
 }
 
 static void fmt_artifact_line(const struct json_value *v)
 {
-	printf("%-9s %-58s %-64s %12lld\n", str_field(v, "tier"), str_field(v, "name"),
-	       str_field(v, "sha256"), int_field(v, "bytes"));
+	const char *version = str_field(v, "version");
+	char size[16];
+
+	const char *tier = str_field(v, "tier");
+
+	human_bytes(int_field(v, "bytes"), size, sizeof(size));
+	/*
+	 * Name and version in their own columns, and no URL column: the
+	 * URL is the name, under images/ for that tier and at the root for
+	 * the other. Printing both just makes the line too wide to read.
+	 *
+	 * An image's "version" is a 64-character manifest hash, so it is
+	 * shown truncated; the full value is in --json.
+	 */
+	/* "image"/"pkg" rather than the directory names, so the column
+	 * stays narrow enough not to push every other one out of line. */
+	fprintf(g_out, "%-5s %-18s %-22.22s %8s  %.12s\n",
+	        strcmp(tier, "images") == 0 ? "image" : "pkg", str_field(v, "artifact"),
+	        version[0] != '\0' ? version : "-", size, str_field(v, "sha256"));
 }
 
 static void fmt_artifacts(const struct json_value *v)
 {
 	const struct json_value *arr = json_object_get(v, "artifacts");
+	char total[16];
 	size_t i;
 
 	if (arr == NULL || arr->type != JSON_ARRAY)
 		return;
+	fprintf(g_out, "%-5s %-18s %-22s %8s  %s\n", "TIER", "ARTIFACT", "VERSION", "SIZE",
+	        "SHA256");
 	for (i = 0; i < arr->u.array.count; i++)
 		fmt_artifact_line(arr->u.array.items[i]);
-	printf("%lld artifacts, %lld bytes\n", int_field(v, "count"), int_field(v, "bytes"));
+	human_bytes(int_field(v, "bytes"), total, sizeof(total));
+	fprintf(g_out, "\n%lld artifacts, %s\n", int_field(v, "count"), total);
+}
+
+static void fmt_log(const struct json_value *v)
+{
+	const struct json_value *arr = json_object_get(v, "entries");
+	size_t i;
+
+	if (arr == NULL || arr->type != JSON_ARRAY)
+		return;
+	for (i = 0; i < arr->u.array.count; i++) {
+		const struct json_value *e = arr->u.array.items[i];
+		time_t secs = (time_t)(int_field(e, "time_ms") / 1000);
+		struct tm tm;
+		char when[32];
+
+		localtime_r(&secs, &tm);
+		strftime(when, sizeof(when), "%H:%M:%S", &tm);
+		fprintf(g_out, "%s  %-5s %s\n", when, str_field(e, "level"), str_field(e, "text"));
+	}
 }
 
 static void fmt_gc(const struct json_value *v)
 {
-	printf("%s: %lld blobs, %lld bytes\n", bool_field(v, "dry_run") ? "would remove" : "removed",
+	fprintf(g_out, "%s: %lld blobs, %lld bytes\n", bool_field(v, "dry_run") ? "would remove" : "removed",
 	       int_field(v, "removed"), int_field(v, "bytes_freed"));
 }
 
 static void fmt_import_status(const struct json_value *v)
 {
-	printf("running:   %s\n", bool_field(v, "running") ? "yes" : "no");
-	printf("elapsed:   %llds\n", int_field(v, "elapsed_seconds"));
-	printf("last exit: %lld\n", int_field(v, "last_exit_status"));
+	fprintf(g_out, "running:   %s\n", bool_field(v, "running") ? "yes" : "no");
+	fprintf(g_out, "elapsed:   %llds\n", int_field(v, "elapsed_seconds"));
+	fprintf(g_out, "last exit: %lld\n", int_field(v, "last_exit_status"));
 }
 
 static void fmt_accepted(const struct json_value *v)
 {
 	(void)v;
-	printf("accepted\n");
+	fprintf(g_out, "accepted\n");
 }
 
 static void fmt_removed(const struct json_value *v)
 {
 	(void)v;
-	printf("removed\n");
+	fprintf(g_out, "removed\n");
 }
 
 /*
@@ -274,15 +364,51 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 }
 
 static int one_call(const struct cix_client *c, int json_mode, const char *method, const char *path,
-                    const char *token, void (*fmt)(const struct json_value *))
+                    const char *token, void (*fmt)(const struct json_value *), int paged)
 {
 	struct cix_response r;
+	int rc;
 
 	if (cix_client_request_with_auth(c, method, path, token, NULL, &r) != 0) {
 		fprintf(stderr, "cixcachectl: could not reach server\n");
 		return 1;
 	}
-	return emit(&r, json_mode, fmt);
+	out_open(paged && !json_mode);
+	rc = emit(&r, json_mode, fmt);
+	out_close();
+	return rc;
+}
+
+/*
+ * Tails the server's activity ring, asking only for what it has not
+ * already shown. One small response per second rather than the whole
+ * ring each time.
+ */
+static int cmd_log_follow(const struct cix_client *c, const char *token)
+{
+	long long after = 0;
+
+	g_out = stdout;
+	for (;;) {
+		struct cix_response r;
+		char path[64];
+
+		snprintf(path, sizeof(path), "/api/v1/log?after=%lld", after);
+		if (cix_client_request_with_auth(c, "GET", path, token, NULL, &r) != 0) {
+			fprintf(stderr, "cixcachectl: could not reach server\n");
+			return 1;
+		}
+		if (r.status < 200 || r.status >= 300) {
+			cix_response_free(&r);
+			fprintf(stderr, "cixcachectl: log request failed (HTTP %d)\n", r.status);
+			return 1;
+		}
+		fmt_log(r.json);
+		fflush(stdout);
+		after = (long long)json_as_number(json_object_get(r.json, "seq"));
+		cix_response_free(&r);
+		sleep(1);
+	}
 }
 
 static void usage(FILE *out)
@@ -293,6 +419,7 @@ static void usage(FILE *out)
 	        "  status                     server and store summary\n"
 	        "  ls                         every published artifact\n"
 	        "  manifest                   MANIFEST.json, generated live\n"
+	        "  log [-f]                   what the server has been doing\n"
 	        "  gc [--dry-run] [--token=]  remove blobs no name points at\n"
 	        "  import [--token=]          migrate a static export into the store\n"
 	        "  import-status              progress of a running import\n"
@@ -306,6 +433,7 @@ static int dispatch_command(const struct cix_client *c, int json_mode, const cha
 	const char *token = NULL;
 	int dry_run = 0;
 	int images = 0;
+	int follow = 0;
 	int i;
 
 	for (i = 0; i < argc; i++) {
@@ -315,19 +443,27 @@ static int dispatch_command(const struct cix_client *c, int json_mode, const cha
 			dry_run = 1;
 		else if (strcmp(argv[i], "--images") == 0)
 			images = 1;
+		else if (strcmp(argv[i], "--follow") == 0 || strcmp(argv[i], "-f") == 0)
+			follow = 1;
 	}
 	if (strcmp(cmd, "status") == 0)
-		return one_call(c, json_mode, "GET", "/api/v1/status", token, fmt_status);
+		return one_call(c, json_mode, "GET", "/api/v1/status", token, fmt_status, 0);
 	if (strcmp(cmd, "ls") == 0)
-		return one_call(c, json_mode, "GET", "/api/v1/artifacts", token, fmt_artifacts);
+		return one_call(c, json_mode, "GET", "/api/v1/artifacts", token, fmt_artifacts, 1);
 	if (strcmp(cmd, "manifest") == 0)
-		return one_call(c, json_mode, "GET", "/MANIFEST.json", token, NULL);
+		return one_call(c, json_mode, "GET", "/MANIFEST.json", token, NULL, 1);
+	if (strcmp(cmd, "log") == 0) {
+		if (follow)
+			return cmd_log_follow(c, token);
+		return one_call(c, json_mode, "GET", "/api/v1/log?after=0", token, fmt_log, 1);
+	}
 	if (strcmp(cmd, "gc") == 0)
-		return one_call(c, json_mode, dry_run ? "GET" : "POST", "/api/v1/gc", token, fmt_gc);
+		return one_call(c, json_mode, dry_run ? "GET" : "POST", "/api/v1/gc", token, fmt_gc, 0);
 	if (strcmp(cmd, "import") == 0)
-		return one_call(c, json_mode, "POST", "/api/v1/import", token, fmt_accepted);
+		return one_call(c, json_mode, "POST", "/api/v1/import", token, fmt_accepted, 0);
 	if (strcmp(cmd, "import-status") == 0)
-		return one_call(c, json_mode, "GET", "/api/v1/import-status", token, fmt_import_status);
+		return one_call(c, json_mode, "GET", "/api/v1/import-status", token, fmt_import_status,
+		                0);
 	if (strcmp(cmd, "put") == 0)
 		return cmd_put(c, argc, argv);
 	if (strcmp(cmd, "rm") == 0) {
@@ -338,7 +474,7 @@ static int dispatch_command(const struct cix_client *c, int json_mode, const cha
 			return 2;
 		}
 		snprintf(path, sizeof(path), "%s%s", images ? "/images/" : "/", argv[0]);
-		return one_call(c, json_mode, "DELETE", path, token, fmt_removed);
+		return one_call(c, json_mode, "DELETE", path, token, fmt_removed, 0);
 	}
 	fprintf(stderr, "cixcachectl: unknown command '%s'\n", cmd);
 	usage(stderr);
@@ -368,6 +504,7 @@ int main(int argc, char **argv)
 			break;
 		i++;
 	}
+	g_out = stdout;
 	cix_client_init(&client, host, port);
 	if (i >= argc) {
 		usage(stderr);

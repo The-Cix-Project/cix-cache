@@ -75,22 +75,37 @@
 				<thead>
 					<tr>
 						<th>Tier</th>
-						<th>Name</th>
-						<th>sha256</th>
+						<th>Artifact</th>
+						<th>Version</th>
 						<th class="num">Size</th>
-						<th>URL</th>
+						<th>sha256</th>
 					</tr>
 				</thead>
 				<tbody id="artifact-rows"></tbody>
 			</table>
 		</div>
 		<div class="empty" id="artifact-empty" hidden>No artifacts published.</div>
+		<div class="panel-head" id="pager">
+			<button id="page-prev">prev</button>
+			<button id="page-next">next</button>
+			<span class="pill" id="page-label"></span>
+		</div>
 		<p class="note">
 			This listing is for operators. No Cix host ever consults it &mdash; a host
 			fetches one exact artifact URL and verifies the bytes against the checksum
 			in its recipe, which lives in git, not here. The registry is a cache, never
 			a catalogue.
 		</p>
+	</section>
+
+	<section class="panel">
+		<div class="panel-head">
+			<h2>Server activity</h2>
+			<span class="pill">everything the server is doing, newest first</span>
+			<span class="spacer"></span>
+			<button id="log-clear">clear</button>
+		</div>
+		<div id="log"></div>
 	</section>
 
 	<section class="panel">
@@ -103,7 +118,6 @@
 			<span class="spacer"></span>
 			<span class="pill" id="import-state"></span>
 		</div>
-		<div id="log"></div>
 	</section>
 </main>
 

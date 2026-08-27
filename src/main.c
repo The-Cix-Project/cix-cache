@@ -13,6 +13,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <signal.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -50,6 +51,27 @@
 #define XFER_TIMEOUT_MS 300000
 
 #define UPLOAD_MAX_BYTES (16LL * 1024 * 1024 * 1024)
+
+/*
+ * A small in-memory ring of what the server has been doing, so an
+ * operator can watch it without shelling in for journalctl. Everything
+ * written here also goes to stderr, which systemd captures -- the ring
+ * is a convenience, never the record.
+ *
+ * Bounded and overwritten oldest-first on purpose: this must not be a
+ * place where memory grows with traffic, and a registry that ran out of
+ * memory keeping a log of serving artifacts would be an absurd way to
+ * fail.
+ */
+#define LOG_RING 512
+#define LOG_TEXT_MAX 200
+
+struct log_entry {
+	long long seq;
+	long long wall_ms;
+	char level[8];
+	char text[LOG_TEXT_MAX];
+};
 
 enum conn_kind { CONN_LISTENER, CONN_CLIENT, CONN_HASH_CHILD, CONN_IMPORT_CHILD, CONN_DEAD };
 
@@ -95,6 +117,7 @@ struct conn {
 	struct conn *child;
 
 	long long last_ms;
+	char note[16];
 	struct conn *next;
 };
 
@@ -109,6 +132,9 @@ static long g_requests;
 static long g_artifact_hits;
 static long g_artifact_misses;
 
+static struct log_entry g_log[LOG_RING];
+static long long g_log_seq;
+
 static int g_import_running;
 static pid_t g_import_pid;
 static long long g_import_started_ms;
@@ -122,6 +148,29 @@ static long long now_ms(void)
 
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static long long wall_ms(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_REALTIME, &ts);
+	return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static void server_log(const char *level, const char *fmt, ...)
+{
+	struct log_entry *e = &g_log[g_log_seq % LOG_RING];
+	va_list ap;
+
+	e->seq = ++g_log_seq;
+	e->wall_ms = wall_ms();
+	snprintf(e->level, sizeof(e->level), "%s", level);
+	va_start(ap, fmt);
+	vsnprintf(e->text, sizeof(e->text), fmt, ap);
+	va_end(ap);
+	/* Also to stderr, so the journal stays the durable copy. */
+	fprintf(stderr, "cixcached: %s\n", e->text);
 }
 
 static void on_signal(int sig)
@@ -253,6 +302,10 @@ static void begin_response(struct conn *cc, int status, const char *content_type
 		conn_close(cc);
 		return;
 	}
+	if (cc->http.method[0] != '\0')
+		server_log(status >= 400 ? "warn" : "info", "%s %s -> %d %s%lld bytes",
+		           cc->http.method, cc->http.path, status,
+		           cc->note[0] != '\0' ? cc->note : "", content_length);
 	cc->hdr_len = (size_t)n;
 	cc->hdr_off = 0;
 	cc->state = CONN_SEND_HEADER;
@@ -356,12 +409,12 @@ static void serve_artifact(struct conn *cc, const struct http_request *req, enum
 		 * unreachable" must not look the same from the outside.
 		 */
 		g_artifact_misses++;
-		fprintf(stderr, "cixcached: MISS %s %s (%s)\n", req->method, cc->http.path,
-		        store_error_str(e));
+		snprintf(cc->note, sizeof(cc->note), "MISS ");
 		respond_error(cc, e == STORE_ERR_INVALID_NAME ? 400 : 404, store_error_str(e));
 		return;
 	}
 	g_artifact_hits++;
+	snprintf(cc->note, sizeof(cc->note), "HIT ");
 	snprintf(extra, sizeof(extra), "X-Cix-Sha256: %s\r\n", digest);
 	cc->head_only = head_only;
 	if (head_only) {
@@ -423,8 +476,8 @@ static void finish_upload(struct conn *cc)
 		 * server is not a trust boundary and this check does not make
 		 * it one; it just refuses to store bytes nobody asked for.
 		 */
-		fprintf(stderr, "push: digest mismatch for %s: declared %s, got %s\n", cc->up_name,
-		        cc->up_digest, digest);
+		server_log("warn", "push %s rejected: declared %s, body hashes %s", cc->up_name,
+		           cc->up_digest, digest);
 		respond_error(cc, 400, "body does not match declared sha256");
 		return;
 	}
@@ -443,6 +496,7 @@ static void finish_upload(struct conn *cc)
 		respond_error(cc, 500, store_error_str(e));
 		return;
 	}
+	server_log("info", "published %s -> %s", cc->up_name, digest);
 	begin_response(cc, 201, "application/json", NULL, 0);
 }
 
@@ -588,27 +642,31 @@ static int list_entry(enum store_tier tier, const char *name, const char *digest
 {
 	struct list_ctx *lc = ctx;
 
+	char short_name[STORE_NAME_MAX];
+	char version[STORE_NAME_MAX];
+
+	/*
+	 * No url field: the URL is the name, prefixed with images/ for
+	 * that tier and nothing for the other. Sending both invites them
+	 * to disagree, and the client can derive one from the other.
+	 *
+	 * artifact and version are split for display only -- name stays
+	 * the authoritative key.
+	 */
+	store_split_display(tier, name, short_name, sizeof(short_name), version, sizeof(version));
 	jw_obj_open(lc->w);
 	jw_key(lc->w, "tier");
 	jw_str(lc->w, store_tier_dir(tier));
 	jw_key(lc->w, "name");
 	jw_str(lc->w, name);
+	jw_key(lc->w, "artifact");
+	jw_str(lc->w, short_name);
+	jw_key(lc->w, "version");
+	jw_str(lc->w, version);
 	jw_key(lc->w, "sha256");
 	jw_str(lc->w, digest);
 	jw_key(lc->w, "bytes");
 	jw_int(lc->w, (long long)size);
-	jw_key(lc->w, "url");
-	if (tier == STORE_TIER_IMAGE) {
-		char url[STORE_NAME_MAX + 16];
-
-		snprintf(url, sizeof(url), "/images/%s", name);
-		jw_str(lc->w, url);
-	} else {
-		char url[STORE_NAME_MAX + 4];
-
-		snprintf(url, sizeof(url), "/%s", name);
-		jw_str(lc->w, url);
-	}
 	jw_obj_close(lc->w);
 	lc->count++;
 	if (size > 0)
@@ -628,6 +686,76 @@ static int count_entry(enum store_tier tier, const char *name, const char *diges
 	if (size > 0)
 		lc->bytes += (long long)size;
 	return 0;
+}
+
+/*
+ * Reads one query parameter out of a raw path. No decoding and no
+ * repeated keys: the only callers want a small integer.
+ */
+static int query_int(const char *path, const char *key, long long *out)
+{
+	const char *q = strchr(path, '?');
+	size_t klen = strlen(key);
+
+	if (q == NULL)
+		return -1;
+	q++;
+	while (*q != '\0') {
+		if (strncmp(q, key, klen) == 0 && q[klen] == '=') {
+			*out = strtoll(q + klen + 1, NULL, 10);
+			return 0;
+		}
+		q = strchr(q, '&');
+		if (q == NULL)
+			break;
+		q++;
+	}
+	return -1;
+}
+
+/*
+ * Entries newer than ?after=<seq>. A client polls with the last seq it
+ * saw and gets only what it has not, so tailing costs one small
+ * response per interval rather than the whole ring each time.
+ */
+static void api_log(struct conn *cc, const char *raw_path)
+{
+	struct json_writer w;
+	long long after = 0;
+	long long oldest;
+	long long i;
+
+	query_int(raw_path, "after", &after);
+	oldest = g_log_seq > LOG_RING ? g_log_seq - LOG_RING : 0;
+	if (after < oldest)
+		after = oldest;
+
+	jw_init(&w);
+	jw_obj_open(&w);
+	jw_key(&w, "entries");
+	jw_arr_open(&w);
+	for (i = after + 1; i <= g_log_seq; i++) {
+		const struct log_entry *e = &g_log[(i - 1) % LOG_RING];
+
+		if (e->seq != i)
+			continue;
+		jw_obj_open(&w);
+		jw_key(&w, "seq");
+		jw_int(&w, e->seq);
+		jw_key(&w, "time_ms");
+		jw_int(&w, e->wall_ms);
+		jw_key(&w, "level");
+		jw_str(&w, e->level);
+		jw_key(&w, "text");
+		jw_str(&w, e->text);
+		jw_obj_close(&w);
+	}
+	jw_arr_close(&w);
+	jw_key(&w, "seq");
+	jw_int(&w, g_log_seq);
+	jw_obj_close(&w);
+	respond_json(cc, 200, &w);
+	jw_free(&w);
 }
 
 static void api_status(struct conn *cc)
@@ -706,6 +834,9 @@ static void api_gc(struct conn *cc, int dry_run)
 	int removed;
 
 	removed = store_gc(dry_run, &freed);
+	if (removed >= 0)
+		server_log("info", "gc%s removed %d blobs, %lld bytes", dry_run ? " (dry run)" : "",
+		           removed, freed);
 	if (removed < 0) {
 		respond_error(cc, 500, "garbage collection failed");
 		return;
@@ -920,6 +1051,8 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 				return;
 			}
 			e = store_unpublish(tier, name);
+			if (e == STORE_OK)
+				server_log("info", "unpublished %s", name);
 			if (e != STORE_OK) {
 				respond_error(cc, e == STORE_ERR_NOT_FOUND ? 404 : 400, store_error_str(e));
 				return;
@@ -953,6 +1086,10 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 		}
 		if (is_get && strcmp(ep, "artifacts") == 0) {
 			api_artifacts(cc);
+			return;
+		}
+		if (is_get && strcmp(ep, "log") == 0) {
+			api_log(cc, req->path);
 			return;
 		}
 		if (is_get && strcmp(ep, "import-status") == 0) {
@@ -1309,8 +1446,8 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	g_started_ms = now_ms();
-	printf("cixcached %s serving %s on %s:%d\n", CIXCACHE_BUILD_VERSION, g_conf.root, g_conf.bind,
-	       g_conf.port);
+	server_log("info", "cixcached %s serving %s on %s:%d", CIXCACHE_BUILD_VERSION, g_conf.root,
+	           g_conf.bind, g_conf.port);
 	fflush(stdout);
 
 	while (!g_stop) {

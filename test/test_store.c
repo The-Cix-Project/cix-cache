@@ -62,6 +62,56 @@ static void test_names(void)
 	      "uppercase is not a canonical digest");
 }
 
+/*
+ * Display-only splitting. Every case here is a real name from the
+ * store, chosen because each breaks a naive splitter in a different
+ * way: a hyphen in the package name, two of them, a letter inside the
+ * version, a "v" prefix, and a version with no digit boundary at all.
+ */
+static void test_split_display(void)
+{
+	static const struct {
+		const char *file;
+		const char *name;
+		const char *version;
+	} cases[] = {
+		{ "bash-5.2.37-2.tar.gz", "bash", "5.2.37-2" },
+		{ "libc-dev-2.36.tar.gz", "libc-dev", "2.36" },
+		{ "nss-pam-ldapd-0.9.13-2.tar.gz", "nss-pam-ldapd", "0.9.13-2" },
+		{ "squashfs-tools-4.7.5-5.tar.gz", "squashfs-tools", "4.7.5-5" },
+		{ "openssh-10.4p1-8.tar.gz", "openssh", "10.4p1-8" },
+		{ "openldap-client-2.6.14.tar.gz", "openldap-client", "2.6.14" },
+		{ "gcc-16.2.0-11.tar.gz", "gcc", "16.2.0-11" },
+		{ "cix-v2.1.1.tar.gz", "cix", "v2.1.1" },
+		{ "tcc-0.9.27.tar.gz", "tcc", "0.9.27" },
+		{ "noversion.tar.gz", "noversion", "" }
+	};
+	char name[256];
+	char version[256];
+	size_t i;
+
+	for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+		char msg[160];
+
+		store_split_display(STORE_TIER_PACKAGE, cases[i].file, name, sizeof(name), version,
+		                    sizeof(version));
+		snprintf(msg, sizeof(msg), "%s splits to '%s' + '%s' (got '%s' + '%s')", cases[i].file,
+		         cases[i].name, cases[i].version, name, version);
+		CHECK(strcmp(name, cases[i].name) == 0 && strcmp(version, cases[i].version) == 0, msg);
+	}
+
+	/* Images are exact rather than inferred: the hash is fixed-width. */
+	{
+		char image[256];
+
+		snprintf(image, sizeof(image), "cix-hosttools-%s.tar.gz", HEX64);
+		store_split_display(STORE_TIER_IMAGE, image, name, sizeof(name), version,
+		                    sizeof(version));
+		CHECK(strcmp(name, "cix-hosttools") == 0, "image name splits at the manifest hash");
+		CHECK(strcmp(version, HEX64) == 0, "image version is the manifest hash");
+	}
+}
+
 static void test_publish(const char *root)
 {
 	char digest_a[STORE_SHA256_MAX];
@@ -166,6 +216,7 @@ int main(void)
 		return 1;
 	}
 	test_names();
+	test_split_display();
 	test_publish(root);
 	test_gc(root);
 

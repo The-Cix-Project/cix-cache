@@ -131,6 +131,26 @@ int main(void)
 		CHECK(atoi(misses) > 0, "artifact misses are counted separately");
 	}
 
+	/* The activity ring, and that ?after= only returns what is newer. */
+	{
+		char c[600];
+		char n1[64];
+		char n2[64];
+
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/log?after=0' | grep -o '\"seq\"' | wc -l",
+		         PORT);
+		ts_capture(c, n1, sizeof(n1));
+		CHECK(atoi(n1) > 1, "the server log records what it has been doing");
+
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/log?after=999999' | grep -o '\"text\"' "
+		         "| wc -l",
+		         PORT);
+		ts_capture(c, n2, sizeof(n2));
+		CHECK(atoi(n2) == 0, "?after= past the end returns nothing to re-show");
+	}
+
 	ts_stop(&ts);
 	if (g_failures == 0)
 		printf("test_serve: ok\n");

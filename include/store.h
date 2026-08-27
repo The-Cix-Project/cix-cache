@@ -83,6 +83,28 @@ int store_name_is_valid(enum store_tier tier, const char *name);
 int store_digest_is_valid(const char *s);
 
 /*
+ * Splits a published filename into a display name and version.
+ *
+ * DISPLAY ONLY. Nothing on the resolution path may call this. The
+ * whole basename is the key and is looked up literally, for the reason
+ * given above: "<name>-<version>" has no unambiguous split, and a
+ * splitter that guesses wrong on the serving path would be a
+ * correctness bug. Guessing wrong in a table column is a cosmetic one.
+ *
+ * Images are exact: the last 64 characters before .tar.gz are the
+ * manifest hash, so the boundary is known rather than inferred.
+ *
+ * Packages are a heuristic -- the version begins at the first hyphen
+ * followed by a digit, or by 'v' and a digit. That is right for all 80
+ * artifacts currently in the store (libc-dev-2.36, nss-pam-ldapd-0.9.13-2,
+ * squashfs-tools-4.7.5-5, openssh-10.4p1-8, cix-v2.1.1 included), and
+ * when it finds no such boundary it puts everything in the name and
+ * leaves the version empty rather than inventing one.
+ */
+void store_split_display(enum store_tier tier, const char *name, char *out_name,
+                         size_t out_name_size, char *out_version, size_t out_version_size);
+
+/*
  * Resolves a published name to the digest its symlink points at,
  * without opening the blob. STORE_ERR_NOT_FOUND is the ordinary
  * answer for a miss and is never logged as an error -- a 404 here just

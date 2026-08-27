@@ -5,22 +5,6 @@
 #include <stdio.h>
 #include <string.h>
 
-/*
- * Splits an image artifact filename into its image name and version.
- * The shape is guaranteed by store_name_is_valid(): the last 64
- * characters before .tar.gz are the manifest hash, and the character
- * before them is the separating hyphen.
- */
-static void image_split(const char *name, char *out_name, size_t out_name_size, char *out_version,
-                        size_t out_version_size)
-{
-	size_t stem = strlen(name) - 7;
-	size_t base = stem - STORE_SHA256_HEX_LEN - 1;
-
-	snprintf(out_name, out_name_size, "%.*s", (int)base, name);
-	snprintf(out_version, out_version_size, "%.*s", STORE_SHA256_HEX_LEN, name + base + 1);
-}
-
 static int emit_entry(enum store_tier tier, const char *name, const char *digest, off_t size,
                       void *ctx)
 {
@@ -32,7 +16,8 @@ static int emit_entry(enum store_tier tier, const char *name, const char *digest
 		char image_name[STORE_NAME_MAX];
 		char version[STORE_SHA256_MAX];
 
-		image_split(name, image_name, sizeof(image_name), version, sizeof(version));
+		store_split_display(tier, name, image_name, sizeof(image_name), version,
+		                    sizeof(version));
 		jw_key(w, image_name);
 		jw_obj_open(w);
 		jw_key(w, "version");

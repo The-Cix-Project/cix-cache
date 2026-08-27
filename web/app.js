@@ -15,8 +15,19 @@ const cache = {
 	importing: false
 };
 
+/*
+ * 85 artifacts already overflow a screen and the store only grows, so
+ * the table pages rather than scrolling forever. Filtering applies
+ * before paging, and any filter change resets to the first page --
+ * otherwise you can filter down to three rows and still be looking at
+ * page four of nothing.
+ */
+const PAGE_SIZE = 50;
+
 let tierFilter = "";
 let textFilter = "";
+let page = 0;
+let logSeq = 0;
 
 const ledTx = document.getElementById("led-tx");
 const ledRx = document.getElementById("led-rx");
@@ -26,16 +37,32 @@ function ledBlink(led) {
 	setTimeout(() => led.classList.remove("lit"), 120);
 }
 
-function logLine(what, detail, kind) {
+function logLine(text, kind) {
 	const log = document.getElementById("log");
 	const line = document.createElement("div");
 
 	if (kind)
 		line.className = kind;
-	line.textContent = new Date().toISOString().substring(11, 19) + "  " + what + "  " + detail;
+	line.textContent = text;
 	log.insertBefore(line, log.firstChild);
-	while (log.childNodes.length > 200)
+	while (log.childNodes.length > 400)
 		log.removeChild(log.lastChild);
+}
+
+/*
+ * The server's own activity ring, not this page's view of it. Asks for
+ * entries after the last sequence number it saw, so a poll costs one
+ * small response instead of the whole ring.
+ */
+async function refreshLog() {
+	const data = await apiRequest("GET", "/api/v1/log?after=" + logSeq);
+
+	for (const e of data.entries || []) {
+		const when = new Date(e.time_ms).toTimeString().substring(0, 8);
+
+		logLine(when + "  " + e.text, e.level === "warn" ? "err" : "");
+	}
+	logSeq = data.seq;
 }
 
 function token() {
@@ -65,12 +92,8 @@ async function apiRequest(method, path, opts) {
 	if (!res.ok) {
 		const message = json && json.error ? json.error : "request failed (HTTP " + res.status + ")";
 
-		if (method !== "GET")
-			logLine(method + " " + path, "-> " + res.status + " " + message, "err");
 		throw new Error(message);
 	}
-	if (method !== "GET")
-		logLine(method + " " + path, "-> " + res.status, "ok");
 	return json;
 }
 
@@ -160,24 +183,40 @@ function renderStatus() {
 function copyDigest(digest) {
 	if (navigator.clipboard)
 		navigator.clipboard.writeText(digest).then(
-			() => logLine("copied", digest, "ok"),
-			() => logLine("copy failed", digest, "err"));
+			() => logLine("copied " + digest, "ok"),
+			() => logLine("could not copy to clipboard", "err"));
+}
+
+/* The URL is the name -- images one level down, packages at the root. */
+function artifactUrl(a) {
+	return (a.tier === "images" ? "/images/" : "/") + a.name;
+}
+
+function matches(a) {
+	const needle = textFilter.toLowerCase();
+
+	if (tierFilter && a.tier !== tierFilter)
+		return false;
+	if (!needle)
+		return true;
+	return a.name.toLowerCase().indexOf(needle) >= 0 || a.sha256.indexOf(needle) >= 0;
 }
 
 function renderArtifacts() {
 	const body = document.getElementById("artifact-rows");
-	const needle = textFilter.toLowerCase();
-	let shown = 0;
+	const shown = cache.artifacts.filter(matches);
+	const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
 	let bytes = 0;
 
-	body.textContent = "";
-	for (const a of cache.artifacts) {
-		if (tierFilter && a.tier !== tierFilter)
-			continue;
-		if (needle && a.name.toLowerCase().indexOf(needle) < 0 &&
-		    a.sha256.indexOf(needle) < 0)
-			continue;
+	if (page >= pages)
+		page = pages - 1;
 
+	for (const a of shown)
+		if (a.bytes > 0)
+			bytes += a.bytes;
+
+	body.textContent = "";
+	for (const a of shown.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)) {
 		const row = document.createElement("tr");
 
 		const tierCell = document.createElement("td");
@@ -187,10 +226,35 @@ function renderArtifacts() {
 		tierCell.appendChild(badge);
 		row.appendChild(tierCell);
 
+		/*
+		 * The name is the link, so the URL is not repeated in a
+		 * column of its own. Hovering shows the full filename, which
+		 * is what the store is actually keyed by.
+		 */
 		const nameCell = document.createElement("td");
-		nameCell.className = "mono";
-		nameCell.textContent = a.name;
+		const link = document.createElement("a");
+		link.className = "mono";
+		link.href = artifactUrl(a);
+		link.textContent = a.artifact;
+		link.title = a.name;
+		nameCell.appendChild(link);
 		row.appendChild(nameCell);
+
+		const versionCell = document.createElement("td");
+		versionCell.className = "mono";
+		if (a.tier === "images") {
+			/* A manifest hash, not a label -- truncated, full on hover. */
+			versionCell.textContent = a.version.substring(0, 16) + "…";
+			versionCell.title = a.version;
+		} else {
+			versionCell.textContent = a.version || "-";
+		}
+		row.appendChild(versionCell);
+
+		const sizeCell = document.createElement("td");
+		sizeCell.className = "num";
+		sizeCell.textContent = a.bytes < 0 ? "dangling" : humanBytes(a.bytes);
+		row.appendChild(sizeCell);
 
 		const digestCell = document.createElement("td");
 		const digest = document.createElement("span");
@@ -201,26 +265,18 @@ function renderArtifacts() {
 		digestCell.appendChild(digest);
 		row.appendChild(digestCell);
 
-		const sizeCell = document.createElement("td");
-		sizeCell.className = "num";
-		sizeCell.textContent = a.bytes < 0 ? "dangling" : humanBytes(a.bytes);
-		row.appendChild(sizeCell);
-
-		const urlCell = document.createElement("td");
-		const link = document.createElement("a");
-		link.className = "mono";
-		link.href = a.url;
-		link.textContent = a.url;
-		urlCell.appendChild(link);
-		row.appendChild(urlCell);
-
 		body.appendChild(row);
-		shown++;
-		if (a.bytes > 0)
-			bytes += a.bytes;
 	}
-	document.getElementById("artifact-empty").hidden = shown > 0;
-	setText("artifact-count", shown + " shown, " + humanBytes(bytes));
+
+	document.getElementById("artifact-empty").hidden = shown.length > 0;
+	document.getElementById("pager").hidden = shown.length <= PAGE_SIZE;
+	document.getElementById("page-prev").disabled = page === 0;
+	document.getElementById("page-next").disabled = page >= pages - 1;
+	setText("page-label", shown.length === 0
+		? ""
+		: (page * PAGE_SIZE + 1) + "-" + Math.min((page + 1) * PAGE_SIZE, shown.length) +
+		  " of " + shown.length);
+	setText("artifact-count", shown.length + " shown, " + humanBytes(bytes));
 }
 
 function renderImport() {
@@ -268,6 +324,7 @@ async function poll() {
 		await refreshStatus();
 		await refreshArtifacts();
 		await refreshImport();
+		await refreshLog();
 		reach.className = "pill ok";
 		reach.textContent = "";
 		reach.appendChild(document.createTextNode("server "));
@@ -290,21 +347,18 @@ async function runGc(dryRun) {
 	try {
 		const r = await apiRequest(dryRun ? "GET" : "POST", "/api/v1/gc", { auth: !dryRun });
 
-		logLine(dryRun ? "gc dry-run" : "gc",
-		        r.removed + " blobs, " + humanBytes(r.bytes_freed), "ok");
 		await poll();
 	} catch (e) {
-		logLine("gc", e.message, "err");
+		logLine("gc failed: " + e.message, "err");
 	}
 }
 
 async function runImport() {
 	try {
 		await apiRequest("POST", "/api/v1/import", { auth: true });
-		logLine("import", "started", "ok");
 		await refreshImport();
 	} catch (e) {
-		logLine("import", e.message, "err");
+		logLine("import failed: " + e.message, "err");
 	}
 }
 
@@ -325,14 +379,32 @@ document.getElementById("theme-toggle").addEventListener("click", () => {
 
 document.getElementById("filter").addEventListener("input", (e) => {
 	textFilter = e.target.value.trim();
+	page = 0;
 	renderArtifacts();
 });
 
 for (const btn of document.querySelectorAll(".tier-btn"))
 	btn.addEventListener("click", () => {
 		tierFilter = btn.getAttribute("data-tier");
+		page = 0;
 		renderArtifacts();
 	});
+
+document.getElementById("page-prev").addEventListener("click", () => {
+	if (page > 0) {
+		page--;
+		renderArtifacts();
+	}
+});
+
+document.getElementById("page-next").addEventListener("click", () => {
+	page++;
+	renderArtifacts();
+});
+
+document.getElementById("log-clear").addEventListener("click", () => {
+	document.getElementById("log").textContent = "";
+});
 
 document.getElementById("btn-gc-dry").addEventListener("click", () => runGc(true));
 document.getElementById("btn-gc").addEventListener("click", () => runGc(false));

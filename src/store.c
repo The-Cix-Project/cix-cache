@@ -142,6 +142,39 @@ int store_name_is_valid(enum store_tier tier, const char *name)
 	return 1;
 }
 
+void store_split_display(enum store_tier tier, const char *name, char *out_name,
+                         size_t out_name_size, char *out_version, size_t out_version_size)
+{
+	size_t len = strlen(name);
+	size_t stem = len > 7 ? len - 7 : len;
+	size_t i;
+
+	out_name[0] = '\0';
+	out_version[0] = '\0';
+	if (tier == STORE_TIER_IMAGE && stem > STORE_SHA256_HEX_LEN) {
+		size_t base = stem - STORE_SHA256_HEX_LEN - 1;
+
+		snprintf(out_name, out_name_size, "%.*s", (int)base, name);
+		snprintf(out_version, out_version_size, "%.*s", STORE_SHA256_HEX_LEN,
+		         name + base + 1);
+		return;
+	}
+	for (i = 0; i + 1 < stem; i++) {
+		char next = name[i + 1];
+		int starts_version = (next >= '0' && next <= '9') ||
+		                     (next == 'v' && i + 2 < stem && name[i + 2] >= '0' &&
+		                      name[i + 2] <= '9');
+
+		if (name[i] == '-' && starts_version) {
+			snprintf(out_name, out_name_size, "%.*s", (int)i, name);
+			snprintf(out_version, out_version_size, "%.*s", (int)(stem - i - 1), name + i + 1);
+			return;
+		}
+	}
+	/* No boundary found -- say so by leaving the version empty. */
+	snprintf(out_name, out_name_size, "%.*s", (int)stem, name);
+}
+
 static int tier_entry_path(enum store_tier tier, const char *name, char *out, size_t out_size)
 {
 	if ((size_t)snprintf(out, out_size, "%s/%s/%s", g_root, store_tier_dir(tier), name) >=

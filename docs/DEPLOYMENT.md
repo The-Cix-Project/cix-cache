@@ -106,7 +106,8 @@ cixcachectl import-status
 
 ```
 cixcachectl status                        # store and server summary
-cixcachectl ls                            # every published artifact
+cixcachectl ls                            # every published artifact, paged
+cixcachectl log [-f]                      # what the server has been doing
 cixcachectl manifest                      # MANIFEST.json, generated live
 cixcachectl gc --dry-run                  # what collection would remove
 cixcachectl gc --token=<t>                # remove unreferenced blobs
