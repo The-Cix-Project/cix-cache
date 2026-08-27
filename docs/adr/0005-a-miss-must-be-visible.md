@@ -35,18 +35,35 @@ that does not match what the recipe computes — presents identically as
 
 Distinguish "not cached" from "cached but unreachable" from the outside.
 
-**Every artifact miss logs the exact request that missed**, method and
-path verbatim, plus the reason (`not found` versus `invalid artifact
-name` — the second means the client asked for something that could never
-exist, which is a different problem):
+**Every request is logged with the exact path, its status, and whether
+an artifact lookup hit or missed**:
 
 ```
-cixcached: MISS GET /gcc-16.2.0-11.tar.gz (not found)
+GET /bc-1.08.1-2.tar.gz  -> 200 HIT 137115 bytes
+GET /gcc-16.2.0-11.tar.gz -> 404 MISS 21 bytes
 ```
+
+The status code carries the distinction this ADR originally spelled out
+in words: 404 is "not cached", 400 is "that name could never exist" —
+a different problem, and one the client caused.
+
+This started as a dedicated `MISS` line separate from any access log.
+Once the server grew a general activity log there were two lines per
+missed request saying the same thing, so the miss became an annotation
+on the access line instead. One line per request, still naming the
+exact URL, which is all this ADR ever required.
 
 **Hits and misses are counted separately** and exposed as
 `artifact_hits` / `artifact_misses` on `GET /api/v1/status`, in
 `cixcachectl status`, and on the dashboard.
+
+**The log is reachable without shell access.** It is kept in a bounded
+in-memory ring and served from `GET /api/v1/log?after=<seq>`, which the
+dashboard displays and `cixcachectl log -f` follows. Everything in the
+ring is also written to stderr, so the journal remains the durable
+record and the ring is only a convenience -- an operator watching a
+first install should not have to `ssh` somewhere to see whether the
+registry is being reached.
 
 The dashboard colours the counter as a warning when there are misses and
 **zero** hits, because that specific combination is the signature of a
@@ -56,10 +73,14 @@ is wrong.
 
 ## Consequences
 
-- `test_serve` asserts both counters move, so the signal cannot be
-  refactored away silently.
-- Miss logging is one `fprintf` per miss on a path that is already doing
-  a `readlink`, so the cost is irrelevant next to serving an artifact.
+- `test_serve` asserts both counters move and that the log records
+  activity, so the signal cannot be refactored away silently.
+- Logging is one formatted line per response on a path that is already
+  doing a `readlink` and a `sendfile`, so the cost is irrelevant next to
+  serving an artifact.
+- The ring is bounded and overwritten oldest-first. A registry that ran
+  out of memory keeping a record of serving artifacts would be an absurd
+  way to fail, so the log can lose history but never grow without limit.
 - This is the observability half of the layout fix. The other half is
   structural: the server maps URLs onto the store itself (ADR-0001), so
   the layout that caused this cannot recur by rearranging directories.
