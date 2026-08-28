@@ -32,6 +32,29 @@ are reported.
 Artifact paths are the only ones ending `.tar.gz`, so the two namespaces
 cannot collide.
 
+## Artifact names
+
+Canonical identity is **`<name>-<version>-<release>`**, and an omitted
+release means `1`:
+
+```
+gawk-5.3.0-7        name=gawk    version=5.3.0     release=7
+mtools-4.0.49-1     name=mtools  version=4.0.49    release=1
+cix-v2.2.0-rc6-1    name=cix     version=v2.2.0-rc6  release=1
+```
+
+`version` is upstream's, verbatim. `release` is Cix's own packaging
+revision of that version, and moves when the recipe changes and upstream
+does not.
+
+A push under a non-canonical name is **stored canonically**, and a fetch
+under one is served as an **alias** of the canonical entry — one file,
+one checksum, both spellings resolving to it. So recipes written before
+the standard keep working while they are updated, rather than silently
+falling back to a source build. Alias hits are logged and counted, since
+a thing that works is otherwise invisible. See
+`docs/adr/0007-canonical-artifact-names.md`.
+
 ## The invariant
 
 The registry is **never a trust boundary**, and it is a **cache, never a

@@ -116,15 +116,133 @@ int store_name_is_valid(const char *name)
 	return 1;
 }
 
+/*
+ * Offset of the first digit of the release inside a stem, or 0 when
+ * the stem carries none. See store_canonical_name() for the rule and
+ * why it is the tail alone that is parsed.
+ */
+static size_t release_offset(const char *name, size_t stem)
+{
+	size_t dash = 0;
+	size_t i;
+	int version_before = 0;
+
+	for (i = stem; i > 0; i--) {
+		if (name[i - 1] == '-') {
+			dash = i - 1;
+			break;
+		}
+	}
+	/* No hyphen, or nothing on one side of it, means no release. */
+	if (dash == 0 || dash + 1 >= stem)
+		return 0;
+
+	for (i = dash + 1; i < stem; i++) {
+		if (name[i] < '0' || name[i] > '9')
+			return 0;
+	}
+
+	/*
+	 * A release is a revision OF a version, so one has to precede it.
+	 * Without this, a date-style version like foo-20250101 would read
+	 * as release 20250101 of a package called foo.
+	 */
+	for (i = dash; i > 0; i--) {
+		if (name[i - 1] == '-')
+			break;
+		if (name[i - 1] >= '0' && name[i - 1] <= '9')
+			version_before = 1;
+	}
+	if (!version_before)
+		return 0;
+	return dash + 1;
+}
+
+/*
+ * True if the stem's last hyphen-separated component contains a digit,
+ * which is what stands in for "this name carries a version at all".
+ */
+static int has_version(const char *name, size_t stem)
+{
+	size_t i;
+
+	for (i = stem; i > 0; i--) {
+		if (name[i - 1] == '-')
+			break;
+		if (name[i - 1] >= '0' && name[i - 1] <= '9')
+			return 1;
+	}
+	return 0;
+}
+
+int store_canonical_name(const char *name, char *out, size_t out_size)
+{
+	size_t len;
+	size_t stem;
+	size_t rel;
+	size_t z;
+
+	if (!store_name_is_valid(name))
+		return -1;
+	len = strlen(name);
+	stem = len - 7; /* store_name_is_valid() guarantees the .tar.gz */
+	rel = release_offset(name, stem);
+
+	if (rel == 0) {
+		/*
+		 * A release qualifies a version, so a name carrying no
+		 * version has nothing for it to qualify. Appending -1 to
+		 * "noversion" yields "noversion-1", which then reads as
+		 * version 1 and canonicalizes again -- so canonical form
+		 * would not be a fixed point, and an entry stored under one
+		 * spelling would be unreachable under the other. Leave such
+		 * a name exactly as it is rather than inventing a version.
+		 */
+		if (!has_version(name, stem)) {
+			if ((size_t)snprintf(out, out_size, "%s", name) >= out_size)
+				return -1;
+			return 0;
+		}
+		if ((size_t)snprintf(out, out_size, "%.*s-1.tar.gz", (int)stem, name) >= out_size)
+			return -1;
+	} else {
+		/* Skip leading zeros textually; strtol here could overflow. */
+		z = rel;
+		while (z + 1 < stem && name[z] == '0')
+			z++;
+		if ((size_t)snprintf(out, out_size, "%.*s-%.*s.tar.gz", (int)(rel - 1), name,
+		                     (int)(stem - z), name + z) >= out_size)
+			return -1;
+	}
+	return strcmp(out, name) != 0 ? 1 : 0;
+}
+
 void store_split_display(const char *name, char *out_name, size_t out_name_size, char *out_version,
-                         size_t out_version_size)
+                         size_t out_version_size, int *out_release)
 {
 	size_t len = strlen(name);
 	size_t stem = len > 7 ? len - 7 : len;
+	size_t rel;
 	size_t i;
 
 	out_name[0] = '\0';
 	out_version[0] = '\0';
+
+	rel = release_offset(name, stem);
+	if (out_release != NULL) {
+		*out_release = 1;
+		if (rel != 0) {
+			int v = 0;
+
+			for (i = rel; i < stem; i++)
+				v = v * 10 + (name[i] - '0');
+			*out_release = v;
+		}
+	}
+	/* The release is reported on its own, so keep it out of the version. */
+	if (rel != 0)
+		stem = rel - 1;
+
 	for (i = 0; i + 1 < stem; i++) {
 		char next = name[i + 1];
 		int starts_version = (next >= '0' && next <= '9') ||
@@ -141,11 +259,32 @@ void store_split_display(const char *name, char *out_name, size_t out_name_size,
 	snprintf(out_name, out_name_size, "%.*s", (int)stem, name);
 }
 
-static int entry_path(const char *name, char *out, size_t out_size)
+static int raw_entry_path(const char *name, char *out, size_t out_size)
 {
 	if ((size_t)snprintf(out, out_size, "%s/%s/%s", g_root, STORE_DIR, name) >= out_size)
 		return -1;
 	return 0;
+}
+
+/*
+ * Every path into the store is canonicalised here, at the one choke
+ * point every caller already goes through. That is what makes a
+ * non-canonical request an alias rather than a miss: exactly one file
+ * exists per artifact and both spellings of its name reach it, so no
+ * second entry, no second checksum, and nothing to drift.
+ *
+ * Doing it here rather than in each caller is also what keeps resolve,
+ * publish and unpublish from ever disagreeing about which file a name
+ * means -- a disagreement that would show up as a 409 against a name
+ * that appears not to exist.
+ */
+static int entry_path(const char *name, char *out, size_t out_size)
+{
+	char canonical[STORE_NAME_MAX];
+
+	if (store_canonical_name(name, canonical, sizeof(canonical)) < 0)
+		return -1;
+	return raw_entry_path(canonical, out, out_size);
 }
 
 static int blob_path(const char *digest, char *out, size_t out_size)
@@ -155,19 +294,15 @@ static int blob_path(const char *digest, char *out, size_t out_size)
 	return 0;
 }
 
-enum store_error store_resolve(const char *name, char *out_digest, size_t out_digest_size)
+/* Reads the digest out of the symlink at an exact path. */
+static enum store_error resolve_path(const char *path, char *out_digest, size_t out_digest_size)
 {
-	char path[PATH_MAX];
 	char target[PATH_MAX];
 	const char *base;
 	ssize_t n;
 
 	if (out_digest_size < STORE_SHA256_MAX)
 		return STORE_ERR_IO;
-	if (!store_name_is_valid(name))
-		return STORE_ERR_INVALID_NAME;
-	if (entry_path(name, path, sizeof(path)) != 0)
-		return STORE_ERR_INVALID_NAME;
 	n = readlink(path, target, sizeof(target) - 1);
 	if (n < 0)
 		return errno == ENOENT ? STORE_ERR_NOT_FOUND : STORE_ERR_IO;
@@ -179,6 +314,19 @@ enum store_error store_resolve(const char *name, char *out_digest, size_t out_di
 	memcpy(out_digest, base, STORE_SHA256_MAX - 1);
 	out_digest[STORE_SHA256_MAX - 1] = '\0';
 	return STORE_OK;
+}
+
+enum store_error store_resolve(const char *name, char *out_digest, size_t out_digest_size)
+{
+	char path[PATH_MAX];
+
+	if (out_digest_size < STORE_SHA256_MAX)
+		return STORE_ERR_IO;
+	if (!store_name_is_valid(name))
+		return STORE_ERR_INVALID_NAME;
+	if (entry_path(name, path, sizeof(path)) != 0)
+		return STORE_ERR_INVALID_NAME;
+	return resolve_path(path, out_digest, out_digest_size);
 }
 
 enum store_error store_open(const char *name, int *out_fd, off_t *out_size, char *out_digest,
@@ -393,17 +541,134 @@ int store_walk(int (*fn)(const char *name, const char *digest, off_t size, time_
 			continue;
 		if (!store_name_is_valid(de->d_name))
 			continue;
-		if (store_resolve(de->d_name, digest, sizeof(digest)) != STORE_OK)
+		/*
+		 * The LITERAL name on disk, never store_resolve(), which
+		 * canonicalises: an entry not yet migrated would resolve to
+		 * a canonical name that does not exist, be skipped here, and
+		 * so vanish from every listing -- and from the live set the
+		 * collector builds, which would then free its blob. The walk
+		 * reports the store as it is, not as it ought to be spelled.
+		 */
+		if (raw_entry_path(de->d_name, link_path, sizeof(link_path)) != 0)
+			continue;
+		if (resolve_path(link_path, digest, sizeof(digest)) != STORE_OK)
 			continue;
 		store_blob_exists(digest, &size);
-		if (entry_path(de->d_name, link_path, sizeof(link_path)) == 0 &&
-		    lstat(link_path, &lst) == 0)
+		if (lstat(link_path, &lst) == 0)
 			mtime = lst.st_mtime;
 		rc = fn(de->d_name, digest, size, mtime, ctx);
 		if (rc != 0)
 			break;
 	}
 	closedir(d);
+	return rc;
+}
+
+/*
+ * Names needing a rename are collected before any is performed rather
+ * than renamed inside the walk: renaming an entry while readdir() is
+ * mid-directory can make the reader skip or repeat entries, and a
+ * migration that quietly misses one is worse than one that refuses to
+ * start.
+ */
+struct rename_set {
+	char *slots;
+	size_t count;
+	size_t cap;
+};
+
+static int collect_noncanonical(const char *name, const char *digest, off_t size, time_t mtime,
+                                void *ctx)
+{
+	struct rename_set *set = ctx;
+	char canonical[STORE_NAME_MAX];
+
+	(void)digest;
+	(void)size;
+	(void)mtime;
+	if (store_canonical_name(name, canonical, sizeof(canonical)) != 1)
+		return 0; /* already canonical, or not a name we can rewrite */
+	if (set->count == set->cap) {
+		size_t cap = set->cap != 0 ? set->cap * 2 : 64;
+		char *grown = realloc(set->slots, cap * STORE_NAME_MAX);
+
+		if (grown == NULL)
+			return -1;
+		set->slots = grown;
+		set->cap = cap;
+	}
+	snprintf(set->slots + set->count * STORE_NAME_MAX, STORE_NAME_MAX, "%s", name);
+	set->count++;
+	return 0;
+}
+
+int store_canonicalize(int dry_run, int *out_renamed, int *out_conflicts)
+{
+	struct rename_set set;
+	char canonical[STORE_NAME_MAX];
+	char from[PATH_MAX];
+	char to[PATH_MAX];
+	struct stat st;
+	size_t i;
+	int renamed = 0;
+	int conflicts = 0;
+	int rc = 0;
+
+	set.slots = NULL;
+	set.count = 0;
+	set.cap = 0;
+	if (store_walk(collect_noncanonical, &set) != 0) {
+		free(set.slots);
+		fprintf(stderr, "cixcached: cannot read the store to canonicalize it\n");
+		return -1;
+	}
+
+	for (i = 0; i < set.count; i++) {
+		const char *name = set.slots + i * STORE_NAME_MAX;
+
+		if (store_canonical_name(name, canonical, sizeof(canonical)) != 1)
+			continue;
+		/*
+		 * Raw paths on both sides: entry_path() canonicalises, so it
+		 * would hand back the same path for the old name and the new
+		 * one and the rename would be a no-op onto itself.
+		 */
+		if (raw_entry_path(name, from, sizeof(from)) != 0 ||
+		    raw_entry_path(canonical, to, sizeof(to)) != 0) {
+			fprintf(stderr, "canonicalize: %s: path too long\n", name);
+			rc = -1;
+			continue;
+		}
+		if (lstat(to, &st) == 0) {
+			/*
+			 * Both names already exist. Renaming would destroy one of
+			 * them, and which one is a question about two different
+			 * byte sequences that only an operator can answer.
+			 */
+			fprintf(stderr, "canonicalize: %s -> %s: target exists, skipped\n", name,
+			        canonical);
+			conflicts++;
+			continue;
+		}
+		if (dry_run) {
+			printf("would rename %s -> %s\n", name, canonical);
+			renamed++;
+			continue;
+		}
+		if (rename(from, to) != 0) {
+			fprintf(stderr, "canonicalize: %s -> %s: %s\n", name, canonical, strerror(errno));
+			rc = -1;
+			continue;
+		}
+		printf("renamed %s -> %s\n", name, canonical);
+		renamed++;
+	}
+
+	free(set.slots);
+	if (out_renamed != NULL)
+		*out_renamed = renamed;
+	if (out_conflicts != NULL)
+		*out_conflicts = conflicts;
 	return rc;
 }
 

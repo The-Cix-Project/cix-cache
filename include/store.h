@@ -87,21 +87,70 @@ int store_name_is_valid(const char *name);
 int store_digest_is_valid(const char *s);
 
 /*
- * Splits a published filename into a display name and version.
+ * Rewrites a published filename into canonical form.
+ *
+ * Canonical identity is <name>-<version>-<release>, and an omitted
+ * release means 1: mtools-4.0.49.tar.gz is mtools-4.0.49-1.tar.gz.
+ * Release 1 and not 0 because the repository has always behaved that
+ * way -- every package that has been revised went bare -> -2, skipping
+ * -1 entirely, which only makes sense if a bare version already meant
+ * the first packaging. See docs/adr/0007-canonical-artifact-names.md.
+ *
+ * The rule is deliberately narrow: the release is the last
+ * hyphen-separated component when it is all digits AND the component
+ * before it contains a digit. The second half is what stops a
+ * date-style version being eaten -- in foo-20250101 there is no
+ * version for a release to be a release OF, so the digits are the
+ * version. A release only exists relative to a version.
+ *
+ * Nothing before that tail is examined, because it does not need to
+ * be: the name/version boundary cannot be found reliably anyway
+ * (openldap-client-2.6.14 puts hyphens on both sides of it), and
+ * canonical form only asks whether a release is already present.
+ *
+ * An explicit release is re-rendered without leading zeros, so -007
+ * and -7 cannot both exist as names for one thing.
+ *
+ * Returns 1 if out differs from name, 0 if name was already canonical,
+ * -1 if name is invalid or the result would not fit.
+ */
+int store_canonical_name(const char *name, char *out, size_t out_size);
+
+/*
+ * Renames every non-canonical published entry into canonical form.
+ * Blobs are never touched -- this moves symlinks only, so it costs no
+ * I/O proportional to the store's size and cannot lose bytes.
+ *
+ * A rename whose target already exists is refused and counted in
+ * *out_conflicts rather than clobbering it: two names resolving to one
+ * canonical name is a question for an operator, not something to
+ * resolve by picking whichever came last out of readdir.
+ *
+ * Returns 0, or -1 on an error that stopped the pass. Either count
+ * pointer may be NULL.
+ */
+int store_canonicalize(int dry_run, int *out_renamed, int *out_conflicts);
+
+/*
+ * Splits a published filename into a display name, version and release.
  *
  * DISPLAY ONLY. Nothing on the resolution path may call this, for the
  * reason given above. Guessing wrong in a table column is cosmetic;
  * guessing wrong while resolving a URL would not be.
  *
- * The version begins at the first hyphen followed by a digit, or by
- * 'v' and a digit. That is right for every artifact in this store
- * (libc-dev-2.36, nss-pam-ldapd-0.9.13-2, squashfs-tools-4.7.5-5,
- * openssh-10.4p1-8, cix-v2.1.1 included), and where it finds no such
- * boundary it puts everything in the name and leaves the version empty
- * rather than inventing one.
+ * The release is taken by the rule described for
+ * store_canonical_name(), and is reported as 1 when the name carries
+ * none. The version then begins at the first hyphen followed by a
+ * digit, or by 'v' and a digit. That is right for every artifact in
+ * this store (libc-dev-2.36, nss-pam-ldapd-0.9.13-2,
+ * squashfs-tools-4.7.5-5, openssh-10.4p1-8, cix-v2.1.1 included), and
+ * where it finds no such boundary it puts everything in the name and
+ * leaves the version empty rather than inventing one.
+ *
+ * out_release may be NULL.
  */
 void store_split_display(const char *name, char *out_name, size_t out_name_size, char *out_version,
-                         size_t out_version_size);
+                         size_t out_version_size, int *out_release);
 
 /*
  * Resolves a published name to the digest its symlink points at,

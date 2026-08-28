@@ -130,6 +130,7 @@ static long long g_served_bytes;
 static long g_requests;
 static long g_artifact_hits;
 static long g_artifact_misses;
+static long g_artifact_aliases;
 
 static struct log_entry g_log[LOG_RING];
 static long long g_log_seq;
@@ -300,7 +301,8 @@ static int is_observer_path(const char *path)
 	if (strncmp(path, "/api/v1/", 8) == 0)
 		return 1;
 	if (strcmp(path, "/") == 0 || strcmp(path, "/index.html") == 0 ||
-	    strcmp(path, "/app.js") == 0 || strcmp(path, "/style.css") == 0)
+	    strcmp(path, "/app.js") == 0 || strcmp(path, "/style.css") == 0 ||
+	    strcmp(path, "/favicon.svg") == 0)
 		return 1;
 	return 0;
 }
@@ -405,6 +407,7 @@ static void serve_artifact(struct conn *cc, const struct http_request *req, cons
 {
 	char extra[STORE_SHA256_MAX + 32];
 	char digest[STORE_SHA256_MAX];
+	char canonical[STORE_NAME_MAX];
 	enum store_error e;
 	off_t size = 0;
 	int fd = -1;
@@ -439,7 +442,21 @@ static void serve_artifact(struct conn *cc, const struct http_request *req, cons
 		return;
 	}
 	g_artifact_hits++;
-	snprintf(cc->note, sizeof(cc->note), "HIT ");
+	/*
+	 * A hit under a non-canonical name serves the right bytes -- the
+	 * two names are one entry -- but it means a recipe out there is
+	 * still spelling it the old way. Nothing else would ever report
+	 * that, precisely because the alias works, so say it here. The
+	 * note is too small for a name, so the detail goes to the log.
+	 */
+	if (store_canonical_name(name, canonical, sizeof(canonical)) == 1) {
+		g_artifact_aliases++;
+		snprintf(cc->note, sizeof(cc->note), "ALIAS ");
+		server_log("warn", "alias: %s served as %s -- the requester is using a "
+		                   "non-canonical name", name, canonical);
+	} else {
+		snprintf(cc->note, sizeof(cc->note), "HIT ");
+	}
 	snprintf(extra, sizeof(extra), "X-Cix-Sha256: %s\r\n", digest);
 	cc->head_only = head_only;
 	if (head_only) {
@@ -709,16 +726,22 @@ static int list_entry(const char *name, const char *digest, off_t size, time_t m
 
 	char short_name[STORE_NAME_MAX];
 	char version[STORE_NAME_MAX];
+	int release = 1;
 
 	/*
 	 * No url field: the URL is the name, at the root of base_url.
 	 * Sending both invites them to disagree, and the client can derive
 	 * one from the other.
 	 *
-	 * artifact and version are split for display only -- name stays
-	 * the authoritative key.
+	 * artifact, version and release are split for display only --
+	 * name stays the authoritative key.
+	 *
+	 * release is reported as its own number so no consumer has to
+	 * re-parse the string to get at it, and version is upstream's
+	 * alone. A name carrying no release reports 1, which is what it
+	 * means.
 	 */
-	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version));
+	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version), &release);
 	jw_obj_open(lc->w);
 	jw_key(lc->w, "name");
 	jw_str(lc->w, name);
@@ -726,6 +749,8 @@ static int list_entry(const char *name, const char *digest, off_t size, time_t m
 	jw_str(lc->w, short_name);
 	jw_key(lc->w, "version");
 	jw_str(lc->w, version);
+	jw_key(lc->w, "release");
+	jw_int(lc->w, release);
 	jw_key(lc->w, "sha256");
 	jw_str(lc->w, digest);
 	jw_key(lc->w, "bytes");
@@ -747,7 +772,7 @@ static int count_entry(const char *name, const char *digest, off_t size, time_t 
 
 	(void)digest;
 	(void)mtime;
-	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version));
+	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version), NULL);
 	remember_name(lc, short_name);
 	lc->count++;
 	if (size > 0)
@@ -849,6 +874,8 @@ static void api_status(struct conn *cc)
 	jw_int(&w, g_artifact_hits);
 	jw_key(&w, "artifact_misses");
 	jw_int(&w, g_artifact_misses);
+	jw_key(&w, "artifact_aliases");
+	jw_int(&w, g_artifact_aliases);
 	jw_key(&w, "served_bytes");
 	jw_int(&w, g_served_bytes);
 	jw_key(&w, "packages");
@@ -1428,6 +1455,7 @@ static void usage(FILE *out)
 	        "usage: cixcached [--config=PATH] [--root=DIR] [--bind=ADDR] [--port=N]\n"
 	        "                 [--web-root=DIR] [--push-token=TOK] [--pull-token=TOK]\n"
 	        "       cixcached --import [--dry-run] [--root=DIR]\n"
+	        "       cixcached --canonicalize [--dry-run] [--root=DIR]\n"
 	        "       cixcached --version\n");
 }
 
@@ -1436,6 +1464,7 @@ int main(int argc, char **argv)
 	const char *config_path = NULL;
 	struct conn *listener;
 	int do_import = 0;
+	int do_canonicalize = 0;
 	int dry_run = 0;
 	int listen_fd;
 	int i;
@@ -1466,6 +1495,8 @@ int main(int argc, char **argv)
 			snprintf(g_conf.pull_token, sizeof(g_conf.pull_token), "%s", argv[i] + 13);
 		else if (strcmp(argv[i], "--import") == 0)
 			do_import = 1;
+		else if (strcmp(argv[i], "--canonicalize") == 0)
+			do_canonicalize = 1;
 		else if (strcmp(argv[i], "--dry-run") == 0)
 			dry_run = 1;
 		else if (strcmp(argv[i], "--version") == 0) {
@@ -1489,6 +1520,23 @@ int main(int argc, char **argv)
 
 		snprintf(manifest, sizeof(manifest), "%s/MANIFEST.json", g_conf.root);
 		return importer_run(g_conf.root, manifest, dry_run, NULL) == 0 ? 0 : 1;
+	}
+
+	/*
+	 * Offline and explicit, like --import: a store migration is not
+	 * something a daemon should decide to do to an operator's data on
+	 * its way up. It has to be run once after upgrading past v2.3.0,
+	 * because from then on the server looks for canonical names --
+	 * an unmigrated entry stays listed but stops resolving.
+	 */
+	if (do_canonicalize) {
+		int renamed = 0;
+		int conflicts = 0;
+		int rc = store_canonicalize(dry_run, &renamed, &conflicts);
+
+		printf("%s %d entries, %d conflicts\n", dry_run ? "would rename" : "renamed", renamed,
+		       conflicts);
+		return rc == 0 && conflicts == 0 ? 0 : 1;
 	}
 
 	signal(SIGPIPE, SIG_IGN);

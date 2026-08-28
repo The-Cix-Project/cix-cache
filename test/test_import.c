@@ -63,6 +63,7 @@ int main(void)
 	struct import_stats st;
 	char manifest[512];
 	char path[512];
+	char canonical[512];
 	char dup[512];
 	char bad[512];
 
@@ -100,7 +101,16 @@ int main(void)
 	importer_run(root, manifest, 0, &st);
 	CHECK(st.imported == 2, "import moves the two honest files");
 	CHECK(st.mismatched == 1, "import still refuses the mismatched one");
-	CHECK(is_symlink(path), "an imported artifact is now a symlink");
+	/*
+	 * Under its CANONICAL name: the export was written before the
+	 * naming standard existed, so importing one is also the moment it
+	 * gets normalized. The bare path is gone -- adopt() moved those
+	 * bytes into blobs/ -- and the entry that replaces it carries the
+	 * release. Both spellings still resolve; only one file exists.
+	 */
+	snprintf(canonical, sizeof(canonical), "%s/packages/bash-5.2.37-1.tar.gz", root);
+	CHECK(is_symlink(canonical), "an imported artifact is now a canonical symlink");
+	CHECK(!is_symlink(path), "and is not left behind under its bare name");
 	CHECK(is_symlink(dup), "the duplicate is a symlink too");
 	CHECK(!is_symlink(bad), "the mismatched file was left alone");
 

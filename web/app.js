@@ -153,6 +153,13 @@ function matches(a) {
 		return true;
 	if (a.version !== "" && a.version.toLowerCase().indexOf(needle) >= 0)
 		return true;
+	/*
+	 * Also the version as it is written in a name, so searching
+	 * "5.2.37-2" finds it even though version and release are
+	 * separate columns here.
+	 */
+	if (a.version !== "" && (a.version + "-" + a.release).indexOf(needle) >= 0)
+		return true;
 	return a.sha256.indexOf(needle) === 0;
 }
 
@@ -184,6 +191,17 @@ function resultRow(a) {
 	versionCell.className = "mono num";
 	versionCell.textContent = a.version || "-";
 	row.appendChild(versionCell);
+
+	/*
+	 * Its own column, not folded into the version: the version is
+	 * upstream's and the release is ours. 5.2.37 is what the bash
+	 * authors shipped; -2 is what we did to it.
+	 */
+	const relCell = document.createElement("td");
+
+	relCell.className = "mono num rel";
+	relCell.textContent = a.release;
+	row.appendChild(relCell);
 
 	const sizeCell = document.createElement("td");
 	sizeCell.className = "num";
@@ -222,6 +240,8 @@ function renderResults() {
 	const show = query !== "" || browsing;
 
 	results.hidden = !show;
+	/* Lets the layout stop vertically centring once there is a list. */
+	el("main-view").classList.toggle("has-results", show);
 	el("hint").hidden = show;
 	el("q-clear").hidden = query === "";
 	if (!show)
@@ -238,7 +258,7 @@ function renderResults() {
 		const row = document.createElement("tr");
 		const cell = document.createElement("td");
 
-		cell.colSpan = 5;
+		cell.colSpan = 6;
 		cell.className = "empty";
 		cell.textContent = "Nothing matches “" + query + "”.";
 		row.appendChild(cell);

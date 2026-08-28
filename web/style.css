@@ -21,6 +21,7 @@
 	--warn: #c77b06;
 	--error: #c5221f;
 	--accent: #0b64c4;
+	--logo-accent: #00a8e0;
 	--row-alt: rgba(0, 0, 0, 0.035);
 	--hover: rgba(0, 0, 0, 0.05);
 	--shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
@@ -37,6 +38,8 @@
 		--warn: #e2a03f;
 		--error: #ff6b60;
 		--accent: #4c9bf5;
+	--logo-accent: #22bdf0;
+		--logo-accent: #22bdf0;
 		--row-alt: rgba(255, 255, 255, 0.04);
 		--hover: rgba(255, 255, 255, 0.07);
 		--shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
@@ -167,7 +170,7 @@ main {
 	flex: 1;
 	overflow-y: auto;
 	display: flex;
-	justify-content: center;
+	flex-direction: column;
 	padding: 0 1rem;
 }
 
@@ -179,11 +182,33 @@ main[hidden] {
 	display: none;
 }
 
+/*
+ * Centred as a group the way a search home page is, using auto margins
+ * rather than justify-content: a centred flex line that overflows its
+ * container becomes unreachable past the start edge, and auto margins
+ * do not have that failure.
+ */
 .search-wrap {
 	width: 100%;
 	max-width: 860px;
-	padding-top: 7vh;
-	padding-bottom: 2rem;
+	margin: auto;
+	/*
+	 * Biased upward by the extra bottom padding. A block centred on its
+	 * geometry reads as slightly low when its weight is at the top, and
+	 * this one is a large mark over progressively lighter text; the
+	 * bias puts the search box near the optical centre instead.
+	 */
+	padding: 1.5rem 0 clamp(2rem, 9vh, 7rem);
+}
+
+/*
+ * Once results are up they want the height, and a group that re-centres
+ * on every keystroke slides the logo around under the cursor. So the
+ * block settles to the top for as long as there is a list.
+ */
+#main-view.has-results .search-wrap {
+	margin-top: 4vh;
+	margin-bottom: 0;
 }
 
 /*
@@ -192,17 +217,41 @@ main[hidden] {
  * use, not tucked into a corner.
  */
 .wordmark {
-	margin: 0 0 1.4rem;
-	text-align: center;
-	font-size: 3.6rem;
-	font-weight: 600;
-	letter-spacing: -0.04em;
-	line-height: 1;
+	margin: 0 0 1.6rem;
+	line-height: 0;
 	user-select: none;
 }
 
-.wordmark span {
-	color: var(--accent);
+/*
+ * The artwork is traced into two paths so each can be coloured on its
+ * own: the mark takes the page's text colour and so inverts with the
+ * theme, while the word keeps the brand cyan, which carries on both
+ * grounds. Regenerate with tools/trace-logo.py.
+ */
+.logo {
+	display: block;
+	margin: 0 auto;
+	width: min(420px, 64%);
+	height: auto;
+}
+
+.logo-mark {
+	fill: currentColor;
+}
+
+.logo-word {
+	fill: var(--logo-accent);
+}
+
+/* Smaller viewports: the wordmark gives up width before the box does. */
+@media (max-height: 620px) {
+	.logo {
+		width: min(320px, 56%);
+	}
+
+	.wordmark {
+		margin-bottom: 1.1rem;
+	}
 }
 
 .search-box {
@@ -757,4 +806,13 @@ footer {
 	--led-color: var(--error);
 	filter: brightness(1.2);
 	box-shadow: 0 0 6px 1px var(--error);
+}
+
+/*
+ * The release is a small integer next to a much longer version, so it
+ * gets only the width it needs -- otherwise the column reads as empty.
+ */
+.rel {
+	width: 3.5rem;
+	color: var(--muted);
 }

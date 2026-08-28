@@ -151,6 +151,15 @@ static void fmt_status(const struct json_value *v)
 	 */
 	fprintf(g_out, "lookups:   %lld hit, %lld missed\n", int_field(v, "artifact_hits"),
 	        int_field(v, "artifact_misses"));
+	/*
+	 * Hits served under a non-canonical name. They worked -- the two
+	 * names are one entry -- so nothing else would ever mention them,
+	 * which is exactly why a count belongs here: it is the only sign
+	 * that a recipe somewhere still spells a name the old way.
+	 */
+	if (int_field(v, "artifact_aliases") > 0)
+		fprintf(g_out, "aliases:   %lld served under a non-canonical name\n",
+		        int_field(v, "artifact_aliases"));
 	fprintf(g_out, "served:    %lld bytes\n", int_field(v, "served_bytes"));
 	/*
 	 * Two different facts: this store holds four zlibs and three
@@ -178,12 +187,17 @@ static void fmt_artifact_line(const struct json_value *v)
 		strftime(when, sizeof(when), "%Y-%m-%d", &tm);
 	}
 	/*
-	 * Name and version in their own columns, and no URL column: the
-	 * URL is the name, at the root of base_url. Printing both just
-	 * makes the line too wide to read.
+	 * Name, version and release in their own columns, and no URL
+	 * column: the URL is the name, at the root of base_url. Printing
+	 * both just makes the line too wide to read.
+	 *
+	 * The release is its own column rather than part of the version
+	 * because it is Cix's number, not upstream's -- 5.2.37 is what
+	 * the bash authors released, -2 is what we did to it.
 	 */
-	fprintf(g_out, "%-18s %12.12s %9s  %.12s  %10s\n", str_field(v, "artifact"),
-	        version[0] != '\0' ? version : "-", size, str_field(v, "sha256"), when);
+	fprintf(g_out, "%-18s %12.12s %4lld  %9s  %.12s  %10s\n", str_field(v, "artifact"),
+	        version[0] != '\0' ? version : "-", int_field(v, "release"), size,
+	        str_field(v, "sha256"), when);
 }
 
 static void fmt_artifacts(const struct json_value *v)
@@ -194,8 +208,8 @@ static void fmt_artifacts(const struct json_value *v)
 
 	if (arr == NULL || arr->type != JSON_ARRAY)
 		return;
-	fprintf(g_out, "%-18s %12s %9s  %-12s  %10s\n", "ARTIFACT", "VERSION", "SIZE", "SHA256",
-	        "PUBLISHED");
+	fprintf(g_out, "%-18s %12s %4s  %9s  %-12s  %10s\n", "ARTIFACT", "VERSION", "REL", "SIZE",
+	        "SHA256", "PUBLISHED");
 	for (i = 0; i < arr->u.array.count; i++)
 		fmt_artifact_line(arr->u.array.items[i]);
 	human_bytes(int_field(v, "bytes"), total, sizeof(total));

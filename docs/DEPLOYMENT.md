@@ -102,6 +102,35 @@ cixcachectl import --token=<push_token>
 cixcachectl import-status
 ```
 
+## Canonicalizing names (required once, upgrading past v2.3.0)
+
+Artifact names are canonically `<name>-<version>-<release>`, with an
+omitted release meaning `1`. From v2.3.0 the server resolves canonical
+names, so a store written before that must be migrated once:
+
+```
+build/cixcached --root=cache --canonicalize --dry-run   # report, change nothing
+build/cixcached --root=cache --canonicalize             # do it
+```
+
+This renames symlinks only. No blob is touched and no bytes move, so it
+is instant regardless of store size and cannot lose data. A rename whose
+target already exists is refused and counted rather than overwriting
+anything.
+
+**Existing hosts need no change.** A fetch under the old bare name is
+served as an alias of the canonical entry, so recipes that have not been
+updated keep hitting the cache instead of quietly rebuilding from
+source. Those hits are logged and counted:
+
+```
+cixcachectl status | grep aliases       # should fall to zero over time
+```
+
+Skipping the migration is the one failure worth knowing about: an
+unmigrated entry stays listed but stops resolving, which looks exactly
+like a cache that is simply never used.
+
 ## Operating
 
 ```
@@ -114,6 +143,9 @@ cixcachectl gc --token=<t>                # remove unreferenced blobs
 cixcachectl rm NAME --token=<t>           # unpublish a name
 cixcachectl put FILE --name=N --sha256=H --token=<t>
 ```
+
+`ls` shows artifact, version and release in separate columns; the
+release is Cix's number, not upstream's.
 
 `rm` unpublishes a name; the blob survives until collected. A push whose
 body does not match its declared `X-Cix-Sha256` is refused with 400, and
