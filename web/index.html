@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>cix-cache</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%230b64c4'/%3E%3Cpath d='M7 9.5h10M7 14.5h10' stroke='white' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/style.css">
 <script>
 /*
@@ -22,109 +23,120 @@
 </script>
 </head>
 <body>
+
+<!-- Menu bar: what the registry HOLDS. Changes only when something is
+     published or collected. -->
 <header>
-	<h1>cix-cache <span>artifact registry</span></h1>
-	<span class="pill" id="pill-reach">connecting&hellip;</span>
+	<span class="brand">cix-cache</span>
+	<span class="stat"><b id="m-packages">&mdash;</b> packages</span>
+	<span class="stat"><b id="m-images">&mdash;</b> images</span>
+	<span class="stat"><b id="m-bytes">&mdash;</b></span>
 	<span class="spacer"></span>
-	<span class="pill" id="pill-pull"></span>
-	<span class="pill" id="pill-push"></span>
-	<span class="leds">
-		<span class="led" id="led-tx" style="--led-color: var(--accent)"></span>TX
-		<span class="led" id="led-rx" style="--led-color: var(--ok)"></span>RX
-	</span>
-	<button id="theme-toggle" title="Toggle light and dark">theme</button>
+	<button id="btn-maint" class="icon" title="Maintenance" aria-label="Maintenance">
+		<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15a2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 4.1a2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 21 11a2 2 0 1 1 0 4z"/></svg>
+	</button>
+	<button id="btn-theme" class="icon" title="Toggle theme" aria-label="Toggle theme">
+		<svg id="icon-theme" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+	</button>
 </header>
 
 <main>
-	<section class="cards">
-		<div class="card">
-			<div class="label">Packages</div>
-			<div class="value" id="stat-packages">&mdash;</div>
-			<div class="sub" id="stat-package-bytes">&nbsp;</div>
+	<div class="search-wrap">
+		<div class="search-box">
+			<svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.5-4.5"/></svg>
+			<input id="q" type="search" autocomplete="off" spellcheck="false"
+			       placeholder="Search artifacts by name, version or sha256" aria-label="Search artifacts">
+			<button id="q-clear" class="icon subtle" title="Clear" aria-label="Clear" hidden>
+				<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+			</button>
 		</div>
-		<div class="card">
-			<div class="label">Images</div>
-			<div class="value" id="stat-images">&mdash;</div>
-			<div class="sub" id="stat-image-bytes">&nbsp;</div>
-		</div>
-		<div class="card">
-			<div class="label">Served</div>
-			<div class="value" id="stat-served">&mdash;</div>
-			<div class="sub" id="stat-requests">&nbsp;</div>
-			<div class="sub" id="stat-hitmiss">&nbsp;</div>
-		</div>
-		<div class="card">
-			<div class="label">Uptime</div>
-			<div class="value" id="stat-uptime">&mdash;</div>
-			<div class="sub" id="stat-build">&nbsp;</div>
-		</div>
-	</section>
 
-	<section class="panel">
-		<div class="panel-head">
-			<h2>Artifacts</h2>
-			<input id="filter" type="search" placeholder="filter by name or digest" size="28">
-			<button data-tier="" class="tier-btn">all</button>
-			<button data-tier="images" class="tier-btn">images</button>
-			<button data-tier="packages" class="tier-btn">packages</button>
-			<span class="spacer"></span>
-			<span class="pill" id="artifact-count"></span>
+		<div class="chips">
+			<button class="chip tier-btn is-on" data-tier="">all</button>
+			<button class="chip tier-btn" data-tier="images">images</button>
+			<button class="chip tier-btn" data-tier="packages">packages</button>
+			<span class="chip-sep"></span>
+			<button class="chip" id="btn-browse">browse everything</button>
 		</div>
-		<div class="table-wrap">
-			<table>
-				<thead>
-					<tr>
-						<th>Tier</th>
-						<th>Artifact</th>
-						<th>Version</th>
-						<th class="num">Size</th>
-						<th>sha256</th>
-					</tr>
-				</thead>
-				<tbody id="artifact-rows"></tbody>
-			</table>
+
+		<!-- Results drop beneath the box as you type. -->
+		<div id="results" class="results" hidden>
+			<div class="table-wrap">
+				<table>
+					<thead>
+						<tr>
+							<th>Tier</th>
+							<th>Artifact</th>
+							<th>Version</th>
+							<th class="num">Size</th>
+							<th>sha256</th>
+						</tr>
+					</thead>
+					<tbody id="rows"></tbody>
+				</table>
+			</div>
+			<div class="results-foot">
+				<button id="page-prev">prev</button>
+				<button id="page-next">next</button>
+				<span class="spacer"></span>
+				<span class="muted" id="page-label"></span>
+			</div>
 		</div>
-		<div class="empty" id="artifact-empty" hidden>No artifacts published.</div>
-		<div class="panel-head" id="pager">
-			<button id="page-prev">prev</button>
-			<button id="page-next">next</button>
-			<span class="pill" id="page-label"></span>
-		</div>
-		<p class="note">
-			This listing is for operators. No Cix host ever consults it &mdash; a host
-			fetches one exact artifact URL and verifies the bytes against the checksum
-			in its recipe, which lives in git, not here. The registry is a cache, never
-			a catalogue.
+
+		<p class="hint" id="hint">
+			Type to search. This listing is for operators &mdash; no Cix host ever
+			consults it. A host fetches one exact artifact URL and verifies the bytes
+			against the checksum in its recipe, which lives in git, not here.
 		</p>
-	</section>
-
-	<section class="panel">
-		<div class="panel-head">
-			<h2>Server activity</h2>
-			<span class="pill">everything the server is doing, newest first</span>
-			<span class="spacer"></span>
-			<button id="log-clear">clear</button>
-		</div>
-		<div id="log"></div>
-	</section>
-
-	<section class="panel">
-		<div class="panel-head">
-			<h2>Maintenance</h2>
-			<input id="token" type="password" placeholder="push token" size="20">
-			<button id="btn-gc-dry">gc dry-run</button>
-			<button id="btn-gc">collect</button>
-			<button id="btn-import">import export tree</button>
-			<span class="spacer"></span>
-			<span class="pill" id="import-state"></span>
-		</div>
-	</section>
+	</div>
 </main>
 
+<!-- Maintenance popover, anchored to the menu bar -->
+<div id="maint" class="popover" hidden>
+	<label for="token">Push token</label>
+	<input id="token" type="password" placeholder="required for gc and import" autocomplete="off">
+	<div class="popover-actions">
+		<button id="btn-gc-dry">gc dry-run</button>
+		<button id="btn-gc">collect</button>
+		<button id="btn-import">import export tree</button>
+	</div>
+	<p class="muted" id="import-state"></p>
+</div>
+
+<!-- Log: always pinned above the status bar, open or closed. -->
+<section id="logdock" class="collapsed">
+	<div class="logdock-bar">
+		<button id="log-toggle" class="log-toggle" aria-expanded="false">
+			<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>
+			<span>Server activity</span>
+		</button>
+		<span class="muted" id="log-summary"></span>
+		<span class="spacer"></span>
+		<button id="log-clear" class="subtle">clear</button>
+	</div>
+	<div id="log"></div>
+</section>
+
+<!-- Status bar: what the server is DOING, second by second. -->
 <footer>
-	<span id="foot-root">&nbsp;</span>
+	<span class="led-group" title="Server reachability">
+		<span class="led" id="led-up"></span><span id="reach">connecting</span>
+	</span>
+	<span class="sep"></span>
+	<span class="led-group" title="Request and response activity">
+		<span class="led" id="led-tx" style="--led-color: var(--accent)"></span>TX
+		<span class="led" id="led-rx" style="--led-color: var(--ok)"></span>RX
+	</span>
+	<span class="sep"></span>
+	<span id="s-hits">&mdash;</span>
+	<span class="sep"></span>
+	<span id="s-requests">&mdash;</span>
+	<span class="sep"></span>
+	<span id="s-served">&mdash;</span>
 	<span class="spacer"></span>
-	<span id="foot-version">&nbsp;</span>
+	<span id="s-uptime">&mdash;</span>
+	<span class="sep"></span>
+	<span id="s-build" class="muted">&mdash;</span>
 </footer>
 
 <script src="/app.js"></script>

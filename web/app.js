@@ -1,13 +1,14 @@
 "use strict";
 
 /*
- * Vanilla, no framework and no build step, in the same shape as the
- * Cix dashboard: one cache object every renderer reads from, DOM API
+ * Vanilla, no framework and no build step, in the same shape as the Cix
+ * dashboard: one cache object every renderer reads from, DOM API
  * rendering rather than innerHTML, and a single fetch wrapper that
  * blinks the activity LEDs.
  */
 
 const POLL_INTERVAL_MS = 2000;
+const PAGE_SIZE = 25;
 
 const cache = {
 	status: null,
@@ -15,86 +16,23 @@ const cache = {
 	importing: false
 };
 
-/*
- * 85 artifacts already overflow a screen and the store only grows, so
- * the table pages rather than scrolling forever. Filtering applies
- * before paging, and any filter change resets to the first page --
- * otherwise you can filter down to three rows and still be looking at
- * page four of nothing.
- */
-const PAGE_SIZE = 50;
-
 let tierFilter = "";
-let textFilter = "";
+let query = "";
 let page = 0;
 let logSeq = 0;
+let browsing = false;
 
-const ledTx = document.getElementById("led-tx");
-const ledRx = document.getElementById("led-rx");
+const el = (id) => document.getElementById(id);
+const ledTx = el("led-tx");
+const ledRx = el("led-rx");
 
 function ledBlink(led) {
 	led.classList.add("lit");
 	setTimeout(() => led.classList.remove("lit"), 120);
 }
 
-function logLine(text, kind) {
-	const log = document.getElementById("log");
-	const line = document.createElement("div");
-
-	if (kind)
-		line.className = kind;
-	line.textContent = text;
-	log.insertBefore(line, log.firstChild);
-	while (log.childNodes.length > 400)
-		log.removeChild(log.lastChild);
-}
-
-/*
- * The server's own activity ring, not this page's view of it. Asks for
- * entries after the last sequence number it saw, so a poll costs one
- * small response instead of the whole ring.
- */
-async function refreshLog() {
-	const data = await apiRequest("GET", "/api/v1/log?after=" + logSeq);
-
-	for (const e of data.entries || []) {
-		const when = new Date(e.time_ms).toTimeString().substring(0, 8);
-
-		logLine(when + "  " + e.text, e.level === "warn" ? "err" : "");
-	}
-	logSeq = data.seq;
-}
-
-function token() {
-	return document.getElementById("token").value.trim();
-}
-
-async function apiRequest(method, path, opts) {
-	const init = { method: method, headers: {} };
-	const useToken = opts && opts.auth ? token() : "";
-
-	ledBlink(ledTx);
-	if (useToken)
-		init.headers["Authorization"] = "Bearer " + useToken;
-
-	const res = await fetch(path, init);
-
-	ledBlink(ledRx);
-
-	let json = null;
-	if (res.status !== 204) {
-		try {
-			json = await res.json();
-		} catch (e) {
-			json = null;
-		}
-	}
-	if (!res.ok) {
-		const message = json && json.error ? json.error : "request failed (HTTP " + res.status + ")";
-
-		throw new Error(message);
-	}
-	return json;
+function setText(id, value) {
+	el(id).textContent = value;
 }
 
 /* ---------- formatting ---------- */
@@ -126,218 +64,270 @@ function humanDuration(seconds) {
 	return s + "s";
 }
 
-function setText(id, value) {
-	document.getElementById(id).textContent = value;
+/* ---------- transport ---------- */
+
+function token() {
+	return el("token").value.trim();
 }
 
-/* ---------- renderers ---------- */
+async function apiRequest(method, path, opts) {
+	const init = { method: method, headers: {} };
+	const useToken = opts && opts.auth ? token() : "";
 
-function renderStatus() {
-	const s = cache.status;
+	ledBlink(ledTx);
+	if (useToken)
+		init.headers["Authorization"] = "Bearer " + useToken;
 
-	if (!s)
-		return;
-	setText("stat-packages", String(s.packages));
-	setText("stat-package-bytes", humanBytes(s.package_bytes));
-	setText("stat-images", String(s.images));
-	setText("stat-image-bytes", humanBytes(s.image_bytes));
-	setText("stat-served", humanBytes(s.served_bytes));
-	setText("stat-requests", s.requests + " requests");
-	/*
-	 * Misses are shown next to hits, and in the warning colour once
-	 * there are misses but no hits at all -- that combination is what
-	 * a registry serving the wrong paths looks like, and it is
-	 * otherwise indistinguishable from an idle one.
-	 */
-	const hitmiss = document.getElementById("stat-hitmiss");
-	hitmiss.textContent = s.artifact_hits + " hit / " + s.artifact_misses + " missed";
-	hitmiss.style.color = (s.artifact_misses > 0 && s.artifact_hits === 0)
-		? "var(--warn)" : "";
-	setText("stat-uptime", humanDuration(s.uptime_seconds));
-	setText("stat-build", s.build_version);
-	setText("foot-root", "root: " + s.root);
-	setText("foot-version", "cixcached " + s.build_version + " built " + s.build_time);
+	const res = await fetch(path, init);
 
-	const pull = document.getElementById("pill-pull");
-	pull.className = "pill ok";
-	pull.textContent = "";
-	pull.appendChild(document.createTextNode("pull "));
-	const pullVal = document.createElement("strong");
-	pullVal.textContent = s.pull_open ? "open" : "token";
-	pull.appendChild(pullVal);
+	ledBlink(ledRx);
 
-	/*
-	 * An unauthenticated push is the one configuration worth shouting
-	 * about: pull being open is by design, because consumers verify
-	 * every byte themselves, but an open push lets anyone fill the disk.
-	 */
-	const push = document.getElementById("pill-push");
-	push.className = s.push_configured ? "pill ok" : "pill warn";
-	push.textContent = "";
-	push.appendChild(document.createTextNode("push "));
-	const pushVal = document.createElement("strong");
-	pushVal.textContent = s.push_configured ? "token" : "OPEN";
-	push.appendChild(pushVal);
+	let json = null;
+	if (res.status !== 204) {
+		try {
+			json = await res.json();
+		} catch (e) {
+			json = null;
+		}
+	}
+	if (!res.ok)
+		throw new Error(json && json.error ? json.error
+		                                   : "request failed (HTTP " + res.status + ")");
+	return json;
 }
 
-function copyDigest(digest) {
-	if (navigator.clipboard)
-		navigator.clipboard.writeText(digest).then(
-			() => logLine("copied " + digest, "ok"),
-			() => logLine("could not copy to clipboard", "err"));
+/* ---------- log dock ---------- */
+
+function logLine(text, kind) {
+	const log = el("log");
+	const line = document.createElement("div");
+
+	if (kind)
+		line.className = kind;
+	line.textContent = text;
+	log.insertBefore(line, log.firstChild);
+	while (log.childNodes.length > 400)
+		log.removeChild(log.lastChild);
 }
+
+/*
+ * The server's own activity ring, not this page's view of it. Asks for
+ * entries after the last sequence number it saw, so a poll costs one
+ * small response instead of the whole ring.
+ */
+async function refreshLog() {
+	const data = await apiRequest("GET", "/api/v1/log?after=" + logSeq);
+	const entries = data.entries || [];
+
+	for (const e of entries) {
+		const when = new Date(e.time_ms).toTimeString().substring(0, 8);
+
+		logLine(when + "  " + e.text, e.level === "warn" ? "warn" : "");
+	}
+	logSeq = data.seq;
+	/* Collapsed is the default, so say what is happening behind it. */
+	setText("log-summary", entries.length > 0 ? entries[entries.length - 1].text : "");
+}
+
+/* ---------- results ---------- */
 
 /* The URL is the name -- images one level down, packages at the root. */
 function artifactUrl(a) {
 	return (a.tier === "images" ? "/images/" : "/") + a.name;
 }
 
+const HEX64 = /^[0-9a-f]{64}$/;
+
+/*
+ * Digests are matched by PREFIX, never as a substring, and so are image
+ * versions -- which are digests too.
+ *
+ * Substring matching them looks reasonable and is useless in practice:
+ * every two-character query is a substring of almost every sha256, so
+ * searching "bc" returned 33 artifacts including jumpbox and openssl.
+ * A prefix is also how anyone actually refers to a hash, the way git
+ * and docker short ids work.
+ */
 function matches(a) {
-	const needle = textFilter.toLowerCase();
+	const needle = query.toLowerCase();
 
 	if (tierFilter && a.tier !== tierFilter)
 		return false;
 	if (!needle)
 		return true;
-	return a.name.toLowerCase().indexOf(needle) >= 0 || a.sha256.indexOf(needle) >= 0;
+	if (a.artifact.toLowerCase().indexOf(needle) >= 0)
+		return true;
+	if (a.version !== "" && !HEX64.test(a.version) &&
+	    a.version.toLowerCase().indexOf(needle) >= 0)
+		return true;
+	if (HEX64.test(a.version) && a.version.indexOf(needle) === 0)
+		return true;
+	return a.sha256.indexOf(needle) === 0;
 }
 
-function renderArtifacts() {
-	const body = document.getElementById("artifact-rows");
+function copyDigest(digest) {
+	if (navigator.clipboard)
+		navigator.clipboard.writeText(digest).then(
+			() => logLine("copied " + digest),
+			() => logLine("could not copy to clipboard", "err"));
+}
+
+function resultRow(a) {
+	const row = document.createElement("tr");
+
+	const tierCell = document.createElement("td");
+	const badge = document.createElement("span");
+	badge.className = "badge badge-" + a.tier;
+	badge.textContent = a.tier === "images" ? "image" : "pkg";
+	tierCell.appendChild(badge);
+	row.appendChild(tierCell);
+
+	/*
+	 * The name is the link, so the URL is not repeated in a column of
+	 * its own. Hovering shows the full filename, which is what the
+	 * store is actually keyed by.
+	 */
+	const nameCell = document.createElement("td");
+	const link = document.createElement("a");
+	link.className = "mono";
+	link.href = artifactUrl(a);
+	link.textContent = a.artifact;
+	link.title = a.name;
+	nameCell.appendChild(link);
+	row.appendChild(nameCell);
+
+	const versionCell = document.createElement("td");
+	versionCell.className = "mono";
+	if (a.tier === "images") {
+		/* A manifest hash, not a label -- truncated, full on hover. */
+		versionCell.textContent = a.version.substring(0, 16) + "…";
+		versionCell.title = a.version;
+	} else {
+		versionCell.textContent = a.version || "-";
+	}
+	row.appendChild(versionCell);
+
+	const sizeCell = document.createElement("td");
+	sizeCell.className = "num";
+	sizeCell.textContent = a.bytes < 0 ? "dangling" : humanBytes(a.bytes);
+	row.appendChild(sizeCell);
+
+	const digestCell = document.createElement("td");
+	const digest = document.createElement("span");
+	digest.className = "mono digest";
+	digest.textContent = a.sha256.substring(0, 16) + "…";
+	digest.title = a.sha256 + " (click to copy)";
+	digest.addEventListener("click", () => copyDigest(a.sha256));
+	digestCell.appendChild(digest);
+	row.appendChild(digestCell);
+
+	return row;
+}
+
+function renderResults() {
+	const results = el("results");
+	const body = el("rows");
+	const show = query !== "" || browsing;
+
+	results.hidden = !show;
+	el("hint").hidden = show;
+	el("q-clear").hidden = query === "";
+	if (!show)
+		return;
+
 	const shown = cache.artifacts.filter(matches);
 	const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
-	let bytes = 0;
 
 	if (page >= pages)
 		page = pages - 1;
 
-	for (const a of shown)
-		if (a.bytes > 0)
-			bytes += a.bytes;
-
 	body.textContent = "";
-	for (const a of shown.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE)) {
+	if (shown.length === 0) {
 		const row = document.createElement("tr");
+		const cell = document.createElement("td");
 
-		const tierCell = document.createElement("td");
-		const badge = document.createElement("span");
-		badge.className = "badge badge-" + a.tier;
-		badge.textContent = a.tier === "images" ? "image" : "pkg";
-		tierCell.appendChild(badge);
-		row.appendChild(tierCell);
-
-		/*
-		 * The name is the link, so the URL is not repeated in a
-		 * column of its own. Hovering shows the full filename, which
-		 * is what the store is actually keyed by.
-		 */
-		const nameCell = document.createElement("td");
-		const link = document.createElement("a");
-		link.className = "mono";
-		link.href = artifactUrl(a);
-		link.textContent = a.artifact;
-		link.title = a.name;
-		nameCell.appendChild(link);
-		row.appendChild(nameCell);
-
-		const versionCell = document.createElement("td");
-		versionCell.className = "mono";
-		if (a.tier === "images") {
-			/* A manifest hash, not a label -- truncated, full on hover. */
-			versionCell.textContent = a.version.substring(0, 16) + "…";
-			versionCell.title = a.version;
-		} else {
-			versionCell.textContent = a.version || "-";
-		}
-		row.appendChild(versionCell);
-
-		const sizeCell = document.createElement("td");
-		sizeCell.className = "num";
-		sizeCell.textContent = a.bytes < 0 ? "dangling" : humanBytes(a.bytes);
-		row.appendChild(sizeCell);
-
-		const digestCell = document.createElement("td");
-		const digest = document.createElement("span");
-		digest.className = "mono digest";
-		digest.textContent = a.sha256.substring(0, 16) + "…";
-		digest.title = a.sha256 + " (click to copy)";
-		digest.addEventListener("click", () => copyDigest(a.sha256));
-		digestCell.appendChild(digest);
-		row.appendChild(digestCell);
-
+		cell.colSpan = 5;
+		cell.className = "empty";
+		cell.textContent = "Nothing matches " + (query ? "“" + query + "”" : "that filter") + ".";
+		row.appendChild(cell);
 		body.appendChild(row);
 	}
+	for (const a of shown.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE))
+		body.appendChild(resultRow(a));
 
-	document.getElementById("artifact-empty").hidden = shown.length > 0;
-	document.getElementById("pager").hidden = shown.length <= PAGE_SIZE;
-	document.getElementById("page-prev").disabled = page === 0;
-	document.getElementById("page-next").disabled = page >= pages - 1;
+	el("page-prev").disabled = page === 0;
+	el("page-next").disabled = page >= pages - 1;
 	setText("page-label", shown.length === 0
 		? ""
-		: (page * PAGE_SIZE + 1) + "-" + Math.min((page + 1) * PAGE_SIZE, shown.length) +
+		: (page * PAGE_SIZE + 1) + "–" + Math.min((page + 1) * PAGE_SIZE, shown.length) +
 		  " of " + shown.length);
-	setText("artifact-count", shown.length + " shown, " + humanBytes(bytes));
+}
+
+/* ---------- bars ---------- */
+
+function renderStatus() {
+	const s = cache.status;
+
+	if (!s)
+		return;
+	/* Menu bar: what the registry holds. */
+	setText("m-packages", String(s.packages));
+	setText("m-images", String(s.images));
+	setText("m-bytes", humanBytes(s.package_bytes + s.image_bytes));
+
+	/* Status bar: what the server is doing. */
+	setText("s-requests", s.requests + " req");
+	setText("s-served", humanBytes(s.served_bytes) + " served");
+	setText("s-uptime", "up " + humanDuration(s.uptime_seconds));
+	setText("s-build", s.build_version);
+
+	/*
+	 * Misses alone with no hits at all is the signature of a registry
+	 * nobody can reach, and is otherwise indistinguishable from an idle
+	 * one -- so it is coloured, and nothing else here is.
+	 */
+	const hits = el("s-hits");
+	hits.textContent = s.artifact_hits + " hit / " + s.artifact_misses + " miss";
+	hits.style.color = (s.artifact_misses > 0 && s.artifact_hits === 0) ? "var(--warn)" : "";
+
+	document.title = "cix-cache — " + (s.packages + s.images) + " artifacts";
+}
+
+function renderReach(up) {
+	const led = el("led-up");
+
+	led.classList.toggle("up", up);
+	led.classList.toggle("down", !up);
+	setText("reach", up ? "reachable" : "unreachable");
 }
 
 function renderImport() {
-	const el = document.getElementById("import-state");
-
-	if (!cache.importing) {
-		el.textContent = "";
-		return;
-	}
-	el.className = "pill warn";
-	el.textContent = "";
-	el.appendChild(document.createTextNode("import "));
-	const v = document.createElement("strong");
-	v.textContent = "running";
-	el.appendChild(v);
+	setText("import-state", cache.importing ? "import running…" : "");
 }
 
-/* ---------- refreshers ---------- */
-
-async function refreshStatus() {
-	cache.status = await apiRequest("GET", "/api/v1/status");
-	renderStatus();
-}
-
-async function refreshArtifacts() {
-	const data = await apiRequest("GET", "/api/v1/artifacts");
-
-	cache.artifacts = data.artifacts || [];
-	renderArtifacts();
-}
-
-async function refreshImport() {
-	const data = await apiRequest("GET", "/api/v1/import-status");
-
-	cache.importing = !!data.running;
-	renderImport();
-}
+/* ---------- polling ---------- */
 
 async function poll() {
-	const reach = document.getElementById("pill-reach");
-
 	if (document.hidden)
 		return;
 	try {
-		await refreshStatus();
-		await refreshArtifacts();
-		await refreshImport();
+		cache.status = await apiRequest("GET", "/api/v1/status");
+		renderStatus();
+
+		const data = await apiRequest("GET", "/api/v1/artifacts");
+
+		cache.artifacts = data.artifacts || [];
+		renderResults();
+
+		const imp = await apiRequest("GET", "/api/v1/import-status");
+
+		cache.importing = !!imp.running;
+		renderImport();
+
 		await refreshLog();
-		reach.className = "pill ok";
-		reach.textContent = "";
-		reach.appendChild(document.createTextNode("server "));
-		const v = document.createElement("strong");
-		v.textContent = "reachable";
-		reach.appendChild(v);
+		renderReach(true);
 	} catch (e) {
-		reach.className = "pill";
-		reach.textContent = "";
-		reach.appendChild(document.createTextNode("server "));
-		const v = document.createElement("strong");
-		v.textContent = "unreachable";
-		reach.appendChild(v);
+		renderReach(false);
 	}
 }
 
@@ -345,70 +335,184 @@ async function poll() {
 
 async function runGc(dryRun) {
 	try {
-		const r = await apiRequest(dryRun ? "GET" : "POST", "/api/v1/gc", { auth: !dryRun });
-
+		await apiRequest(dryRun ? "GET" : "POST", "/api/v1/gc", { auth: !dryRun });
 		await poll();
 	} catch (e) {
 		logLine("gc failed: " + e.message, "err");
+		openLog();
 	}
 }
 
 async function runImport() {
 	try {
 		await apiRequest("POST", "/api/v1/import", { auth: true });
-		await refreshImport();
+		await poll();
 	} catch (e) {
 		logLine("import failed: " + e.message, "err");
+		openLog();
 	}
+}
+
+function openLog() {
+	el("logdock").classList.remove("collapsed");
+	el("log-toggle").setAttribute("aria-expanded", "true");
 }
 
 /* ---------- wiring ---------- */
 
-document.getElementById("theme-toggle").addEventListener("click", () => {
-	const root = document.documentElement;
-	const current = root.getAttribute("data-theme");
-	const next = current === "dark" ? "light" : "dark";
+/*
+ * The query lives in the URL fragment, so a search can be linked,
+ * bookmarked and reloaded. Fragment rather than a query string: it
+ * never reaches the server, which has no business knowing what an
+ * operator was looking for.
+ */
+function syncHash() {
+	const want = query ? "#q=" + encodeURIComponent(query) : "";
 
-	root.setAttribute("data-theme", next);
+	if (window.location.hash !== want)
+		history.replaceState(null, "", window.location.pathname + want);
+}
+
+function readHash() {
+	const m = /^#q=(.*)$/.exec(window.location.hash);
+
+	if (m === null)
+		return;
 	try {
-		localStorage.setItem("cixcache-theme", next);
+		query = decodeURIComponent(m[1]);
 	} catch (e) {
-		/* nothing persistent available -- the choice lasts this page only */
+		query = "";
+	}
+	el("q").value = query;
+}
+
+el("q").addEventListener("input", (e) => {
+	query = e.target.value.trim();
+	page = 0;
+	syncHash();
+	renderResults();
+});
+
+el("q").addEventListener("keydown", (e) => {
+	if (e.key === "Escape") {
+		el("q").value = "";
+		query = "";
+		browsing = false;
+		page = 0;
+		syncHash();
+		renderResults();
 	}
 });
 
-document.getElementById("filter").addEventListener("input", (e) => {
-	textFilter = e.target.value.trim();
+el("q-clear").addEventListener("click", () => {
+	el("q").value = "";
+	query = "";
+	browsing = false;
 	page = 0;
-	renderArtifacts();
+	syncHash();
+	renderResults();
+	el("q").focus();
 });
 
 for (const btn of document.querySelectorAll(".tier-btn"))
 	btn.addEventListener("click", () => {
 		tierFilter = btn.getAttribute("data-tier");
 		page = 0;
-		renderArtifacts();
+		for (const other of document.querySelectorAll(".tier-btn"))
+			other.classList.toggle("is-on", other === btn);
+		renderResults();
 	});
 
-document.getElementById("page-prev").addEventListener("click", () => {
+el("btn-browse").addEventListener("click", () => {
+	browsing = !browsing;
+	page = 0;
+	renderResults();
+});
+
+el("page-prev").addEventListener("click", () => {
 	if (page > 0) {
 		page--;
-		renderArtifacts();
+		renderResults();
 	}
 });
 
-document.getElementById("page-next").addEventListener("click", () => {
+el("page-next").addEventListener("click", () => {
 	page++;
-	renderArtifacts();
+	renderResults();
 });
 
-document.getElementById("log-clear").addEventListener("click", () => {
-	document.getElementById("log").textContent = "";
+el("log-toggle").addEventListener("click", () => {
+	const dock = el("logdock");
+	const open = dock.classList.toggle("collapsed") === false;
+
+	el("log-toggle").setAttribute("aria-expanded", open ? "true" : "false");
 });
 
-document.getElementById("btn-gc-dry").addEventListener("click", () => runGc(true));
-document.getElementById("btn-gc").addEventListener("click", () => runGc(false));
-document.getElementById("btn-import").addEventListener("click", runImport);
+el("log-clear").addEventListener("click", () => {
+	el("log").textContent = "";
+});
 
+el("btn-maint").addEventListener("click", (e) => {
+	e.stopPropagation();
+	el("maint").hidden = !el("maint").hidden;
+});
+
+el("maint").addEventListener("click", (e) => e.stopPropagation());
+document.addEventListener("click", () => {
+	el("maint").hidden = true;
+});
+
+el("btn-gc-dry").addEventListener("click", () => runGc(true));
+el("btn-gc").addEventListener("click", () => runGc(false));
+el("btn-import").addEventListener("click", runImport);
+
+/*
+ * The icon shows what clicking will DO, not what is currently on: a
+ * moon means "go dark". Two subpaths in one <path>, so there is nothing
+ * to swap but the d attribute.
+ */
+const ICON_MOON = "M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z";
+const ICON_SUN = "M12 17a5 5 0 1 1 0-10 5 5 0 0 1 0 10zM12 1v2M12 21v2M4.2 4.2l1.4 1.4" +
+                 "M18.4 18.4l1.4 1.4M1 12h2M21 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4";
+
+function isDark() {
+	const set = document.documentElement.getAttribute("data-theme");
+
+	if (set)
+		return set === "dark";
+	return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+function renderThemeIcon() {
+	el("icon-theme").setAttribute("d", isDark() ? ICON_SUN : ICON_MOON);
+}
+
+el("btn-theme").addEventListener("click", () => {
+	const next = isDark() ? "light" : "dark";
+
+	document.documentElement.setAttribute("data-theme", next);
+	try {
+		localStorage.setItem("cixcache-theme", next);
+	} catch (e) {
+		/* nothing persistent available -- the choice lasts this page only */
+	}
+	renderThemeIcon();
+});
+
+/* Follow the system where the viewer has expressed no preference. */
+window.matchMedia("(prefers-color-scheme: dark)")
+	.addEventListener("change", renderThemeIcon);
+
+/* "/" focuses the search from anywhere, as a search-first page should. */
+document.addEventListener("keydown", (e) => {
+	if (e.key === "/" && document.activeElement !== el("q")) {
+		e.preventDefault();
+		el("q").focus();
+	}
+});
+
+renderThemeIcon();
+readHash();
+el("q").focus();
 poll();
 setInterval(poll, POLL_INTERVAL_MS);

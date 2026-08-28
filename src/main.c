@@ -292,6 +292,20 @@ static int epoll_add(struct conn *cc, uint32_t events)
 
 /* ---- responses ---- */
 
+/*
+ * True for the endpoints and assets the dashboard fetches on a timer.
+ * Artifact paths are never observer paths, whoever requests them.
+ */
+static int is_observer_path(const char *path)
+{
+	if (strncmp(path, "/api/v1/", 8) == 0)
+		return 1;
+	if (strcmp(path, "/") == 0 || strcmp(path, "/index.html") == 0 ||
+	    strcmp(path, "/app.js") == 0 || strcmp(path, "/style.css") == 0)
+		return 1;
+	return 0;
+}
+
 static void begin_response(struct conn *cc, int status, const char *content_type, const char *extra,
                            long long content_length)
 {
@@ -302,7 +316,19 @@ static void begin_response(struct conn *cc, int status, const char *content_type
 		conn_close(cc);
 		return;
 	}
-	if (cc->http.method[0] != '\0')
+	/*
+	 * Log what the registry does as a registry, not what the dashboard
+	 * does while watching it. A dashboard polling four endpoints every
+	 * two seconds produces two lines a second forever, which buries
+	 * the artifact traffic the log exists to show -- the observer
+	 * effect, and it made the log useless the first time it was
+	 * actually looked at.
+	 *
+	 * So successful dashboard and asset requests are not recorded.
+	 * Anything that failed still is, whoever asked: a 4xx on an API
+	 * call is a real event even when the dashboard caused it.
+	 */
+	if (cc->http.method[0] != '\0' && (status >= 400 || !is_observer_path(cc->http.path)))
 		server_log(status >= 400 ? "warn" : "info", "%s %s -> %d %s%lld bytes",
 		           cc->http.method, cc->http.path, status,
 		           cc->note[0] != '\0' ? cc->note : "", content_length);
