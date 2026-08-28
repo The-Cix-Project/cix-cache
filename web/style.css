@@ -94,11 +94,6 @@ header {
 	flex: none;
 }
 
-.brand {
-	font-weight: 600;
-	letter-spacing: -0.01em;
-}
-
 header .stat {
 	color: var(--muted);
 	font-size: 0.78rem;
@@ -179,8 +174,27 @@ main {
 .search-wrap {
 	width: 100%;
 	max-width: 860px;
-	padding-top: 9vh;
+	padding-top: 7vh;
 	padding-bottom: 2rem;
+}
+
+/*
+ * The wordmark sits above the search box rather than in the menu bar:
+ * on a search-first page the name belongs with the thing you came to
+ * use, not tucked into a corner.
+ */
+.wordmark {
+	margin: 0 0 1.1rem;
+	text-align: center;
+	font-size: 2.6rem;
+	font-weight: 600;
+	letter-spacing: -0.04em;
+	line-height: 1;
+	user-select: none;
+}
+
+.wordmark span {
+	color: var(--accent);
 }
 
 .search-box {
@@ -230,8 +244,9 @@ main {
 .chips {
 	display: flex;
 	align-items: center;
+	justify-content: center;
 	gap: 0.4rem;
-	margin: 0.75rem 0.35rem 0;
+	margin: 0.85rem 0 0;
 }
 
 .chip {
@@ -375,7 +390,9 @@ a:hover {
 .hint {
 	color: var(--muted);
 	font-size: 0.75rem;
-	margin: 1rem 0.35rem;
+	margin: 1.3rem auto 0;
+	max-width: 46rem;
+	text-align: center;
 	line-height: 1.6;
 }
 
@@ -440,7 +457,35 @@ a:hover {
 	border-top: 1px solid var(--border);
 	display: flex;
 	flex-direction: column;
-	max-height: 40vh;
+}
+
+/*
+ * Grab strip on the dock's top edge. Sits slightly over the border so
+ * the target is easier to hit than the 1px line it appears to be.
+ */
+.log-resize {
+	height: 7px;
+	margin-top: -4px;
+	margin-bottom: -3px;
+	flex: none;
+	cursor: ns-resize;
+	background: transparent;
+	transition: background 100ms linear;
+}
+
+.log-resize:hover,
+.log-resize.dragging {
+	background: var(--accent);
+}
+
+#logdock.collapsed .log-resize {
+	display: none;
+}
+
+/* Whatever the drag set, don't let the dock outgrow the window. */
+body.resizing {
+	cursor: ns-resize;
+	user-select: none;
 }
 
 #logdock.collapsed #log {
@@ -489,6 +534,8 @@ a:hover {
 }
 
 #log {
+	height: 14rem;
+	max-height: 70vh;
 	overflow-y: auto;
 	padding: 0.25rem 0.85rem 0.6rem;
 	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;

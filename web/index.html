@@ -27,7 +27,6 @@
 <!-- Menu bar: what the registry HOLDS. Changes only when something is
      published or collected. -->
 <header>
-	<span class="brand">cix-cache</span>
 	<span class="stat"><b id="m-packages">&mdash;</b> packages</span>
 	<span class="stat"><b id="m-images">&mdash;</b> images</span>
 	<span class="stat"><b id="m-bytes">&mdash;</b></span>
@@ -42,6 +41,7 @@
 
 <main>
 	<div class="search-wrap">
+		<h1 class="wordmark">cix<span>-cache</span></h1>
 		<div class="search-box">
 			<svg class="search-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.5-4.5"/></svg>
 			<input id="q" type="search" autocomplete="off" spellcheck="false"
@@ -105,6 +105,7 @@
 
 <!-- Log: always pinned above the status bar, open or closed. -->
 <section id="logdock" class="collapsed">
+	<div class="log-resize" id="log-resize" title="Drag to resize"></div>
 	<div class="logdock-bar">
 		<button id="log-toggle" class="log-toggle" aria-expanded="false">
 			<svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>

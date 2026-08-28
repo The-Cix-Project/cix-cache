@@ -353,9 +353,112 @@ async function runImport() {
 	}
 }
 
+/*
+ * The dock remembers whether it was open. Someone who opened it is
+ * watching something, and having to reopen it on every reload is
+ * exactly the friction that stops people watching at all.
+ */
+function setLogOpen(open, persist) {
+	el("logdock").classList.toggle("collapsed", !open);
+	el("log-toggle").setAttribute("aria-expanded", open ? "true" : "false");
+	if (!persist)
+		return;
+	try {
+		localStorage.setItem("cixcache-logdock", open ? "open" : "closed");
+	} catch (e) {
+		/* nothing persistent available -- the choice lasts this page only */
+	}
+}
+
+const LOG_MIN_PX = 64;
+
+function logMaxPx() {
+	return Math.round(window.innerHeight * 0.7);
+}
+
+function setLogHeight(px, persist) {
+	const clamped = Math.max(LOG_MIN_PX, Math.min(px, logMaxPx()));
+
+	el("log").style.height = clamped + "px";
+	if (!persist)
+		return;
+	try {
+		localStorage.setItem("cixcache-logheight", String(clamped));
+	} catch (e) {
+		/* nothing persistent available -- the size lasts this page only */
+	}
+}
+
+function restoreLogHeight() {
+	let saved = null;
+
+	try {
+		saved = localStorage.getItem("cixcache-logheight");
+	} catch (e) {
+		saved = null;
+	}
+	if (saved !== null && !isNaN(parseInt(saved, 10)))
+		setLogHeight(parseInt(saved, 10), 0);
+}
+
+/*
+ * Drag the dock's top edge to resize. Pointer events rather than mouse
+ * events so a trackpad or touchscreen works too, with capture so the
+ * drag survives the pointer leaving the 7px strip -- which it will, on
+ * the very first movement.
+ */
+function wireResize() {
+	const grip = el("log-resize");
+	let startY = 0;
+	let startH = 0;
+
+	grip.addEventListener("pointerdown", (e) => {
+		startY = e.clientY;
+		startH = el("log").getBoundingClientRect().height;
+		grip.setPointerCapture(e.pointerId);
+		grip.classList.add("dragging");
+		document.body.classList.add("resizing");
+		e.preventDefault();
+	});
+
+	grip.addEventListener("pointermove", (e) => {
+		if (!grip.hasPointerCapture(e.pointerId))
+			return;
+		/* Dragging the top edge upward makes the dock taller. */
+		setLogHeight(startH + (startY - e.clientY), 0);
+	});
+
+	const end = (e) => {
+		if (!grip.hasPointerCapture(e.pointerId))
+			return;
+		grip.releasePointerCapture(e.pointerId);
+		grip.classList.remove("dragging");
+		document.body.classList.remove("resizing");
+		setLogHeight(el("log").getBoundingClientRect().height, 1);
+	};
+
+	grip.addEventListener("pointerup", end);
+	grip.addEventListener("pointercancel", end);
+}
+
+/* A dock sized on a tall window must not swallow a short one. */
+window.addEventListener("resize", () => {
+	setLogHeight(el("log").getBoundingClientRect().height, 0);
+});
+
+function restoreLogState() {
+	let saved = null;
+
+	try {
+		saved = localStorage.getItem("cixcache-logdock");
+	} catch (e) {
+		saved = null;
+	}
+	setLogOpen(saved === "open", 0);
+}
+
 function openLog() {
-	el("logdock").classList.remove("collapsed");
-	el("log-toggle").setAttribute("aria-expanded", "true");
+	setLogOpen(1, 1);
 }
 
 /* ---------- wiring ---------- */
@@ -442,10 +545,7 @@ el("page-next").addEventListener("click", () => {
 });
 
 el("log-toggle").addEventListener("click", () => {
-	const dock = el("logdock");
-	const open = dock.classList.toggle("collapsed") === false;
-
-	el("log-toggle").setAttribute("aria-expanded", open ? "true" : "false");
+	setLogOpen(el("logdock").classList.contains("collapsed"), 1);
 });
 
 el("log-clear").addEventListener("click", () => {
@@ -512,6 +612,9 @@ document.addEventListener("keydown", (e) => {
 });
 
 renderThemeIcon();
+wireResize();
+restoreLogHeight();
+restoreLogState();
 readHash();
 el("q").focus();
 poll();
