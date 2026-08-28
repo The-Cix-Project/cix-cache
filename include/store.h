@@ -10,7 +10,6 @@
  *
  *   <root>/blobs/<sha256>                    real bytes, mode 0444
  *   <root>/packages/<name>-<version>.tar.gz  -> ../blobs/<sha256>
- *   <root>/images/<name>-<hash>.tar.gz       -> ../blobs/<sha256>
  *   <root>/tmp/                              upload staging, same fs
  *
  * The published entries are symlinks, and that is the whole point: the
@@ -22,9 +21,15 @@
  *
  * Hardlinks would give a cheaper garbage collector (st_nlink is the
  * refcount) but would not encode the digest, so every HEAD would have
- * to re-hash the file -- 2.7 GB for the cix-builder image. Symlinks
- * buy an O(1) hot path at the cost of an O(n) sweep in a collector
- * that runs approximately never. That is the right way round.
+ * to re-hash the file. Symlinks buy an O(1) hot path at the cost of an
+ * O(n) sweep in a collector that runs approximately never. That is the
+ * right way round.
+ *
+ * Packages are the only tier. A whole-image rootfs artifact is derived
+ * from the packages it is composed of -- an image's version is
+ * literally the hash of its sorted name@version manifest -- so storing
+ * one duplicated bytes this store already held. See
+ * docs/adr/0006-packages-are-the-only-tier.md.
  */
 
 #define STORE_SHA256_HEX_LEN 64
@@ -42,6 +47,9 @@
  */
 #define STORE_SHA256SUM_BIN "/usr/bin/sha256sum"
 
+/* Where published names live on disk, under the store root. */
+#define STORE_DIR "packages"
+
 enum store_error {
 	STORE_OK = 0,
 	STORE_ERR_INVALID_NAME,
@@ -50,15 +58,12 @@ enum store_error {
 	STORE_ERR_IO
 };
 
-enum store_tier { STORE_TIER_PACKAGE, STORE_TIER_IMAGE };
-
 /*
- * Creates root/{blobs,packages,images,tmp} if absent. Returns 0, or -1
- * with the reason on stderr.
+ * Creates root/{blobs,packages,tmp} if absent. Returns 0, or -1 with
+ * the reason on stderr.
  */
 int store_init(const char *root);
 const char *store_root(void);
-const char *store_tier_dir(enum store_tier tier);
 
 /*
  * Charset gate for a published filename. Deliberately validates the
@@ -71,13 +76,11 @@ const char *store_tier_dir(enum store_tier tier);
  *
  * Accepts [A-Za-z0-9._-] only, requires a .tar.gz suffix, rejects a
  * leading dot and any "..". Because this is a whitelist, traversal is
- * structurally impossible rather than filtered against. Image-tier
- * names must additionally end in -<64 lowercase hex>.tar.gz, which is
- * the only shape a host can ever compute.
+ * structurally impossible rather than filtered against.
  *
  * Returns 1 if valid, 0 otherwise.
  */
-int store_name_is_valid(enum store_tier tier, const char *name);
+int store_name_is_valid(const char *name);
 
 /* 1 if s is exactly 64 lowercase hex digits. */
 int store_digest_is_valid(const char *s);
@@ -85,24 +88,19 @@ int store_digest_is_valid(const char *s);
 /*
  * Splits a published filename into a display name and version.
  *
- * DISPLAY ONLY. Nothing on the resolution path may call this. The
- * whole basename is the key and is looked up literally, for the reason
- * given above: "<name>-<version>" has no unambiguous split, and a
- * splitter that guesses wrong on the serving path would be a
- * correctness bug. Guessing wrong in a table column is a cosmetic one.
+ * DISPLAY ONLY. Nothing on the resolution path may call this, for the
+ * reason given above. Guessing wrong in a table column is cosmetic;
+ * guessing wrong while resolving a URL would not be.
  *
- * Images are exact: the last 64 characters before .tar.gz are the
- * manifest hash, so the boundary is known rather than inferred.
- *
- * Packages are a heuristic -- the version begins at the first hyphen
- * followed by a digit, or by 'v' and a digit. That is right for all 80
- * artifacts currently in the store (libc-dev-2.36, nss-pam-ldapd-0.9.13-2,
- * squashfs-tools-4.7.5-5, openssh-10.4p1-8, cix-v2.1.1 included), and
- * when it finds no such boundary it puts everything in the name and
- * leaves the version empty rather than inventing one.
+ * The version begins at the first hyphen followed by a digit, or by
+ * 'v' and a digit. That is right for every artifact in this store
+ * (libc-dev-2.36, nss-pam-ldapd-0.9.13-2, squashfs-tools-4.7.5-5,
+ * openssh-10.4p1-8, cix-v2.1.1 included), and where it finds no such
+ * boundary it puts everything in the name and leaves the version empty
+ * rather than inventing one.
  */
-void store_split_display(enum store_tier tier, const char *name, char *out_name,
-                         size_t out_name_size, char *out_version, size_t out_version_size);
+void store_split_display(const char *name, char *out_name, size_t out_name_size, char *out_version,
+                         size_t out_version_size);
 
 /*
  * Resolves a published name to the digest its symlink points at,
@@ -110,15 +108,14 @@ void store_split_display(enum store_tier tier, const char *name, char *out_name,
  * answer for a miss and is never logged as an error -- a 404 here just
  * means "build it from source", and Cix hosts rely on that being cheap.
  */
-enum store_error store_resolve(enum store_tier tier, const char *name, char *out_digest,
-                               size_t out_digest_size);
+enum store_error store_resolve(const char *name, char *out_digest, size_t out_digest_size);
 
 /*
  * Resolves and opens. On STORE_OK the caller owns *out_fd. out_digest
  * may be NULL if the caller does not need it.
  */
-enum store_error store_open(enum store_tier tier, const char *name, int *out_fd, off_t *out_size,
-                            char *out_digest, size_t out_digest_size);
+enum store_error store_open(const char *name, int *out_fd, off_t *out_size, char *out_digest,
+                            size_t out_digest_size);
 
 /*
  * Points name at digest. Idempotent when the name already resolves to
@@ -128,14 +125,12 @@ enum store_error store_open(enum store_tier tier, const char *name, int *out_fd,
  * That conflict is a feature. A recipe version is immutable in git, so
  * a name may only ever mean one byte sequence; silently accepting a
  * republish would let an artifact drift out from under a recipe that
- * already built against it. DESIGN.md section 6 asks that publishing a
- * version and recording its checksum be one act -- refusing the second,
- * different act is how that is enforced.
+ * already built against it.
  */
-enum store_error store_publish(enum store_tier tier, const char *name, const char *digest);
+enum store_error store_publish(const char *name, const char *digest);
 
 /* Removes the published name only. Blobs are removed only by store_gc(). */
-enum store_error store_unpublish(enum store_tier tier, const char *name);
+enum store_error store_unpublish(const char *name);
 
 /* 1 if blobs/<digest> exists; fills *out_size when non-NULL. */
 int store_blob_exists(const char *digest, off_t *out_size);
@@ -160,15 +155,12 @@ int store_tmp_path(char *out, size_t out_size);
 int store_hash_file(const char *path, char *out, size_t out_size);
 
 /*
- * Walks a tier, calling fn for every published name in readdir order.
- * fn returns 0 to continue, non-zero to stop the walk (that value is
- * returned). Digest is the symlink target; size is the blob's size, or
- * -1 if the link dangles.
+ * Walks the store, calling fn for every published name in readdir
+ * order. fn returns 0 to continue, non-zero to stop the walk (that
+ * value is returned). Digest is the symlink target; size is the blob's
+ * size, or -1 if the link dangles.
  */
-int store_walk(enum store_tier tier,
-               int (*fn)(enum store_tier tier, const char *name, const char *digest, off_t size,
-                         void *ctx),
-               void *ctx);
+int store_walk(int (*fn)(const char *name, const char *digest, off_t size, void *ctx), void *ctx);
 
 /*
  * Removes every blob no published name points at, and returns how many

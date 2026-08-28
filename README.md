@@ -1,8 +1,8 @@
 # cix-cache — a push/pull binary artifact registry for Cix
 
-`cixcached` serves precompiled Cix artifacts over the exact URLs an
-unmodified Cix host already requests, so a new box can install packages and
-whole images instead of rebuilding them from source.
+`cixcached` serves precompiled Cix package artifacts over the exact URLs an
+unmodified Cix host already requests, so a new box can install packages
+instead of rebuilding them from source.
 
 It ships with `cixcachectl` (a REST client) and a web dashboard.
 
@@ -14,17 +14,15 @@ build/cixcached --root=cache --bind=0.0.0.0 --port=8080
 
 | Purpose | Request |
 |---|---|
-| package artifact | `GET <base>/<name>-<version>.tar.gz` |
-| image artifact | `GET <base>/images/<name>-<hash>.tar.gz` |
-| publish | `PUT` on either, with `X-Cix-Sha256` |
-| existence probe | `HEAD` on either |
+| artifact | `GET <base>/<name>-<version>.tar.gz` |
+| publish | `PUT`, with `X-Cix-Sha256` |
+| existence probe | `HEAD` |
 | auth | `Authorization: Bearer <token>` |
 
-`<hash>` is not a label. It is the sha256 of the image's sorted
-`name@version,…` manifest string, computed on the host from recipe text
-alone — so the URL is derivable before the artifact exists. `test_contract`
-re-derives it independently and checks it against a version captured from a
-live host.
+Packages are the only tier. An image is a recipe composed of packages —
+its version is the hash of its own package manifest — so a whole-rootfs
+tarball would duplicate bytes this store already holds. Hosts compose
+images from these. See `docs/adr/0006-packages-are-the-only-tier.md`.
 
 Everything else is for people: `/` is the dashboard, `/api/v1/*` is
 observability, and `/MANIFEST.json` is generated from the tree on request.
@@ -55,15 +53,14 @@ binaries they validate. See `docs/adr/0002-registry-is-a-cache-not-a-catalogue.m
 cache/
   blobs/<sha256>                    the bytes, mode 0444
   packages/<name>-<version>.tar.gz  -> ../blobs/<sha256>
-  images/<name>-<hash>.tar.gz       -> ../blobs/<sha256>
   tmp/                              upload staging
 ```
 
 The symlink target *is* the digest, so a name's checksum and size are known
 without an index that could drift and without re-reading the file.
 Duplicate content costs one blob. The server maps URLs onto this layout,
-which is what lets packages be served flat at the root while images sit
-under `images/`.
+which is what lets artifacts be served flat at the root of `base_url`
+while being stored in a directory of their own.
 
 ## Building
 
@@ -78,7 +75,7 @@ Tests are standalone binaries run by hand, against a real server on a
 dedicated port:
 
 ```
-for t in store http manifest import serve push gc contract; do build/test_$t; done
+for t in store http manifest import serve push gc; do build/test_$t; done
 ```
 
 ## Documentation

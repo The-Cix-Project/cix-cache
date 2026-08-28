@@ -31,17 +31,15 @@ static int g_failures;
  */
 #define BIG_BYTES (64LL * 1024 * 1024)
 
-static int publish(struct testserver *ts, const char *src, const char *name, const char *digest,
-                   int images)
+static int publish(struct testserver *ts, const char *src, const char *name, const char *digest)
 {
 	char cmd[1024];
 	char out[64];
 
 	snprintf(cmd, sizeof(cmd),
 	         "curl -s -o /dev/null -w '%%{http_code}' -X PUT -T '%s' "
-	         "-H 'Authorization: Bearer %s' -H 'X-Cix-Sha256: %s' "
-	         "'http://127.0.0.1:%d/%s%s'",
-	         src, TOKEN, digest, ts->port, images ? "images/" : "", name);
+	         "-H 'Authorization: Bearer %s' -H 'X-Cix-Sha256: %s' 'http://127.0.0.1:%d/%s'",
+	         src, TOKEN, digest, ts->port, name);
 	ts_capture(cmd, out, sizeof(out));
 	return atoi(out);
 }
@@ -67,12 +65,15 @@ int main(void)
 		ts_stop(&ts);
 		return 1;
 	}
-	CHECK(publish(&ts, big_path, "big-1.0.tar.gz", digest, 0) == 201, "publish a large package");
+	CHECK(publish(&ts, big_path, "big-1.0.tar.gz", digest) == 201, "publish a large package");
 
 	/* The package tier lives at the ROOT of base_url, not under /packages/. */
 	CHECK(ts_status(PORT, "GET", "/big-1.0.tar.gz", NULL) == 200, "package served at base root");
 	CHECK(ts_status(PORT, "GET", "/packages/big-1.0.tar.gz", NULL) == 404,
 	      "package NOT served under /packages/");
+	/* No second tier: a nested path names nothing (ADR-0006). */
+	CHECK(ts_status(PORT, "GET", "/images/big-1.0.tar.gz", NULL) == 404,
+	      "nothing is served under /images/");
 
 	/*
 	 * The real proof: pull the whole body back through curl -- the

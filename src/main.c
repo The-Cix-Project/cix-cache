@@ -107,7 +107,6 @@ struct conn {
 	char up_path[PATH_MAX];
 	char up_digest[STORE_SHA256_MAX];
 	char up_name[STORE_NAME_MAX];
-	enum store_tier up_tier;
 	long up_expect;
 	long up_received;
 
@@ -401,8 +400,8 @@ static int bearer_ok(const struct http_request *req, const char *expect)
 
 /* ---- artifact serving ---- */
 
-static void serve_artifact(struct conn *cc, const struct http_request *req, enum store_tier tier,
-                           const char *name, int head_only)
+static void serve_artifact(struct conn *cc, const struct http_request *req, const char *name,
+                           int head_only)
 {
 	char extra[STORE_SHA256_MAX + 32];
 	char digest[STORE_SHA256_MAX];
@@ -414,7 +413,7 @@ static void serve_artifact(struct conn *cc, const struct http_request *req, enum
 		respond_error(cc, 401, "authentication required");
 		return;
 	}
-	e = store_open(tier, name, &fd, &size, digest, sizeof(digest));
+	e = store_open(name, &fd, &size, digest, sizeof(digest));
 	if (e != STORE_OK) {
 		/*
 		 * A miss is the ordinary answer, not a fault: the host builds
@@ -513,7 +512,7 @@ static void finish_upload(struct conn *cc)
 		respond_error(cc, 500, store_error_str(e));
 		return;
 	}
-	e = store_publish(cc->up_tier, cc->up_name, digest);
+	e = store_publish(cc->up_name, digest);
 	if (e == STORE_ERR_CONFLICT) {
 		respond_error(cc, 409, "already published with a different sha256");
 		return;
@@ -594,8 +593,7 @@ static void start_hash_child(struct conn *cc)
 	}
 }
 
-static void begin_upload(struct conn *cc, const struct http_request *req, enum store_tier tier,
-                         const char *name)
+static void begin_upload(struct conn *cc, const struct http_request *req, const char *name)
 {
 	char digest[STORE_SHA256_MAX + 8];
 
@@ -609,7 +607,7 @@ static void begin_upload(struct conn *cc, const struct http_request *req, enum s
 		respond_error(cc, 401, "push requires a bearer token");
 		return;
 	}
-	if (!store_name_is_valid(tier, name)) {
+	if (!store_name_is_valid(name)) {
 		respond_error(cc, 400, "invalid artifact name");
 		return;
 	}
@@ -629,7 +627,6 @@ static void begin_upload(struct conn *cc, const struct http_request *req, enum s
 	}
 	snprintf(cc->up_digest, sizeof(cc->up_digest), "%s", digest);
 	snprintf(cc->up_name, sizeof(cc->up_name), "%s", name);
-	cc->up_tier = tier;
 	cc->up_expect = req->content_length;
 	cc->up_received = 0;
 	if (store_tmp_path(cc->up_path, sizeof(cc->up_path)) != 0) {
@@ -663,8 +660,7 @@ struct list_ctx {
 	long long bytes;
 };
 
-static int list_entry(enum store_tier tier, const char *name, const char *digest, off_t size,
-                      void *ctx)
+static int list_entry(const char *name, const char *digest, off_t size, void *ctx)
 {
 	struct list_ctx *lc = ctx;
 
@@ -672,17 +668,15 @@ static int list_entry(enum store_tier tier, const char *name, const char *digest
 	char version[STORE_NAME_MAX];
 
 	/*
-	 * No url field: the URL is the name, prefixed with images/ for
-	 * that tier and nothing for the other. Sending both invites them
-	 * to disagree, and the client can derive one from the other.
+	 * No url field: the URL is the name, at the root of base_url.
+	 * Sending both invites them to disagree, and the client can derive
+	 * one from the other.
 	 *
 	 * artifact and version are split for display only -- name stays
 	 * the authoritative key.
 	 */
-	store_split_display(tier, name, short_name, sizeof(short_name), version, sizeof(version));
+	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version));
 	jw_obj_open(lc->w);
-	jw_key(lc->w, "tier");
-	jw_str(lc->w, store_tier_dir(tier));
 	jw_key(lc->w, "name");
 	jw_str(lc->w, name);
 	jw_key(lc->w, "artifact");
@@ -700,12 +694,10 @@ static int list_entry(enum store_tier tier, const char *name, const char *digest
 	return 0;
 }
 
-static int count_entry(enum store_tier tier, const char *name, const char *digest, off_t size,
-                       void *ctx)
+static int count_entry(const char *name, const char *digest, off_t size, void *ctx)
 {
 	struct list_ctx *lc = ctx;
 
-	(void)tier;
 	(void)name;
 	(void)digest;
 	lc->count++;
@@ -787,13 +779,10 @@ static void api_log(struct conn *cc, const char *raw_path)
 static void api_status(struct conn *cc)
 {
 	struct list_ctx pkgs;
-	struct list_ctx imgs;
 	struct json_writer w;
 
 	memset(&pkgs, 0, sizeof(pkgs));
-	memset(&imgs, 0, sizeof(imgs));
-	store_walk(STORE_TIER_PACKAGE, count_entry, &pkgs);
-	store_walk(STORE_TIER_IMAGE, count_entry, &imgs);
+	store_walk(count_entry, &pkgs);
 
 	jw_init(&w);
 	jw_obj_open(&w);
@@ -817,10 +806,6 @@ static void api_status(struct conn *cc)
 	jw_int(&w, pkgs.count);
 	jw_key(&w, "package_bytes");
 	jw_int(&w, pkgs.bytes);
-	jw_key(&w, "images");
-	jw_int(&w, imgs.count);
-	jw_key(&w, "image_bytes");
-	jw_int(&w, imgs.bytes);
 	jw_key(&w, "pull_open");
 	jw_bool(&w, g_conf.pull_token[0] == '\0');
 	jw_key(&w, "push_configured");
@@ -841,8 +826,7 @@ static void api_artifacts(struct conn *cc)
 	jw_obj_open(&w);
 	jw_key(&w, "artifacts");
 	jw_arr_open(&w);
-	store_walk(STORE_TIER_IMAGE, list_entry, &lc);
-	store_walk(STORE_TIER_PACKAGE, list_entry, &lc);
+	store_walk(list_entry, &lc);
 	jw_arr_close(&w);
 	jw_key(&w, "count");
 	jw_int(&w, lc.count);
@@ -1050,23 +1034,23 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 	 * collide however the store is filled.
 	 */
 	if (ends_with_targz(path)) {
-		enum store_tier tier = STORE_TIER_PACKAGE;
 		const char *name = path + 1;
 
-		if (strncmp(path, "/images/", 8) == 0) {
-			tier = STORE_TIER_IMAGE;
-			name = path + 8;
-		}
+		/*
+		 * Every artifact lives at the root of base_url. A path with a
+		 * directory component -- /images/... included -- names nothing
+		 * this registry has, so it misses like any other unknown name.
+		 */
 		if (strchr(name, '/') != NULL) {
 			respond_error(cc, 404, "no such artifact");
 			return;
 		}
 		if (is_get || is_head) {
-			serve_artifact(cc, req, tier, name, is_head);
+			serve_artifact(cc, req, name, is_head);
 			return;
 		}
 		if (strcmp(req->method, "PUT") == 0) {
-			begin_upload(cc, req, tier, name);
+			begin_upload(cc, req, name);
 			return;
 		}
 		if (strcmp(req->method, "DELETE") == 0) {
@@ -1076,7 +1060,7 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 				respond_error(cc, 401, "push requires a bearer token");
 				return;
 			}
-			e = store_unpublish(tier, name);
+			e = store_unpublish(name);
 			if (e == STORE_OK)
 				server_log("info", "unpublished %s", name);
 			if (e != STORE_OK) {

@@ -256,18 +256,6 @@ main {
 	color: var(--muted);
 }
 
-.chip.is-on {
-	color: var(--accent);
-	border-color: var(--accent);
-}
-
-.chip-sep {
-	width: 1px;
-	height: 1rem;
-	background: var(--border);
-	margin: 0 0.3rem;
-}
-
 /* Results drop beneath the box, as a floating sheet rather than a
  * section of the page -- the search is the subject, not the table. */
 .results {
@@ -346,25 +334,6 @@ a:hover {
 
 .digest:hover {
 	color: var(--accent);
-}
-
-.badge {
-	display: inline-block;
-	padding: 0.02rem 0.4rem;
-	border-radius: 4px;
-	font-size: 0.66rem;
-	font-weight: 600;
-	text-transform: uppercase;
-	letter-spacing: 0.03em;
-	border: 1px solid currentColor;
-}
-
-.badge-images {
-	color: var(--accent);
-}
-
-.badge-packages {
-	color: var(--muted);
 }
 
 .results-foot {

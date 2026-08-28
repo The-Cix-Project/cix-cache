@@ -24,8 +24,7 @@ static int g_failures;
 
 static const char *HEX64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
-static void publish_fixture(const char *root, enum store_tier tier, const char *name,
-                            const char *content)
+static void publish_fixture(const char *root, const char *name, const char *content)
 {
 	char digest[STORE_SHA256_MAX];
 	char tmp[512];
@@ -40,7 +39,7 @@ static void publish_fixture(const char *root, enum store_tier tier, const char *
 	if (store_hash_file(tmp, digest, sizeof(digest)) != 0)
 		return;
 	store_blob_adopt(tmp, digest);
-	store_publish(tier, name, digest);
+	store_publish(name, digest);
 }
 
 int main(void)
@@ -50,15 +49,11 @@ int main(void)
 	const struct json_value *sec;
 	struct json_value *parsed;
 	struct json_writer w;
-	char image_name[256];
-
 	if (mkdtemp(root) == NULL || store_init(root) != 0) {
 		fprintf(stderr, "FAIL: cannot set up store\n");
 		return 1;
 	}
-	snprintf(image_name, sizeof(image_name), "dev-%s.tar.gz", HEX64);
-	publish_fixture(root, STORE_TIER_PACKAGE, "bash-5.2.37-2.tar.gz", "package bytes");
-	publish_fixture(root, STORE_TIER_IMAGE, image_name, "image bytes");
+	publish_fixture(root, "bash-5.2.37-2.tar.gz", "package bytes");
 
 	jw_init(&w);
 	manifest_write_json(&w);
@@ -80,12 +75,8 @@ int main(void)
 	CHECK(entry != NULL && json_as_number(json_object_get(entry, "bytes")) == 13,
 	      "package byte count comes from the blob");
 
-	sec = json_object_get(parsed, "images");
-	CHECK(sec != NULL && sec->type == JSON_OBJECT, "images section present");
-	entry = json_object_get(sec, "dev");
-	CHECK(entry != NULL, "image keyed by bare image name");
-	CHECK(entry != NULL && strcmp(json_as_string(json_object_get(entry, "version")), HEX64) == 0,
-	      "image version is the manifest hash from the filename");
+	CHECK(json_object_get(parsed, "images") == NULL,
+	      "no images section -- packages are the only tier");
 
 	json_free(parsed);
 	jw_free(&w);

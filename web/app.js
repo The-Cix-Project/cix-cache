@@ -16,7 +16,6 @@ const cache = {
 	importing: false
 };
 
-let tierFilter = "";
 let query = "";
 let page = 0;
 let logSeq = 0;
@@ -131,36 +130,28 @@ async function refreshLog() {
 
 /* ---------- results ---------- */
 
-/* The URL is the name -- images one level down, packages at the root. */
+/* The URL is the name, at the root of base_url. */
 function artifactUrl(a) {
-	return (a.tier === "images" ? "/images/" : "/") + a.name;
+	return "/" + a.name;
 }
 
-const HEX64 = /^[0-9a-f]{64}$/;
-
 /*
- * Digests are matched by PREFIX, never as a substring, and so are image
- * versions -- which are digests too.
+ * Digests are matched by PREFIX, never as a substring.
  *
  * Substring matching them looks reasonable and is useless in practice:
  * every two-character query is a substring of almost every sha256, so
- * searching "bc" returned 33 artifacts including jumpbox and openssl.
- * A prefix is also how anyone actually refers to a hash, the way git
- * and docker short ids work.
+ * searching "bc" once returned 33 artifacts including jumpbox and
+ * openssl. A prefix is also how anyone actually refers to a hash, the
+ * way git and docker short ids work.
  */
 function matches(a) {
 	const needle = query.toLowerCase();
 
-	if (tierFilter && a.tier !== tierFilter)
-		return false;
 	if (!needle)
 		return true;
 	if (a.artifact.toLowerCase().indexOf(needle) >= 0)
 		return true;
-	if (a.version !== "" && !HEX64.test(a.version) &&
-	    a.version.toLowerCase().indexOf(needle) >= 0)
-		return true;
-	if (HEX64.test(a.version) && a.version.indexOf(needle) === 0)
+	if (a.version !== "" && a.version.toLowerCase().indexOf(needle) >= 0)
 		return true;
 	return a.sha256.indexOf(needle) === 0;
 }
@@ -174,13 +165,6 @@ function copyDigest(digest) {
 
 function resultRow(a) {
 	const row = document.createElement("tr");
-
-	const tierCell = document.createElement("td");
-	const badge = document.createElement("span");
-	badge.className = "badge badge-" + a.tier;
-	badge.textContent = a.tier === "images" ? "image" : "pkg";
-	tierCell.appendChild(badge);
-	row.appendChild(tierCell);
 
 	/*
 	 * The name is the link, so the URL is not repeated in a column of
@@ -198,13 +182,7 @@ function resultRow(a) {
 
 	const versionCell = document.createElement("td");
 	versionCell.className = "mono";
-	if (a.tier === "images") {
-		/* A manifest hash, not a label -- truncated, full on hover. */
-		versionCell.textContent = a.version.substring(0, 16) + "…";
-		versionCell.title = a.version;
-	} else {
-		versionCell.textContent = a.version || "-";
-	}
+	versionCell.textContent = a.version || "-";
 	row.appendChild(versionCell);
 
 	const sizeCell = document.createElement("td");
@@ -246,9 +224,9 @@ function renderResults() {
 		const row = document.createElement("tr");
 		const cell = document.createElement("td");
 
-		cell.colSpan = 5;
+		cell.colSpan = 4;
 		cell.className = "empty";
-		cell.textContent = "Nothing matches " + (query ? "“" + query + "”" : "that filter") + ".";
+		cell.textContent = "Nothing matches “" + query + "”.";
 		row.appendChild(cell);
 		body.appendChild(row);
 	}
@@ -272,8 +250,7 @@ function renderStatus() {
 		return;
 	/* Menu bar: what the registry holds. */
 	setText("m-packages", String(s.packages));
-	setText("m-images", String(s.images));
-	setText("m-bytes", humanBytes(s.package_bytes + s.image_bytes));
+	setText("m-bytes", humanBytes(s.package_bytes));
 
 	/* Status bar: what the server is doing. */
 	setText("s-requests", s.requests + " req");
@@ -290,7 +267,7 @@ function renderStatus() {
 	hits.textContent = s.artifact_hits + " hit / " + s.artifact_misses + " miss";
 	hits.style.color = (s.artifact_misses > 0 && s.artifact_hits === 0) ? "var(--warn)" : "";
 
-	document.title = "cix-cache — " + (s.packages + s.images) + " artifacts";
+	document.title = "cix-cache — " + s.packages + " artifacts";
 }
 
 function renderReach(up) {
@@ -516,15 +493,6 @@ el("q-clear").addEventListener("click", () => {
 	renderResults();
 	el("q").focus();
 });
-
-for (const btn of document.querySelectorAll(".tier-btn"))
-	btn.addEventListener("click", () => {
-		tierFilter = btn.getAttribute("data-tier");
-		page = 0;
-		for (const other of document.querySelectorAll(".tier-btn"))
-			other.classList.toggle("is-on", other === btn);
-		renderResults();
-	});
 
 el("btn-browse").addEventListener("click", () => {
 	browsing = !browsing;

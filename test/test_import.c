@@ -111,8 +111,8 @@ int main(void)
 		char a[STORE_SHA256_MAX];
 		char b[STORE_SHA256_MAX];
 
-		CHECK(store_resolve(STORE_TIER_PACKAGE, "bash-5.2.37.tar.gz", a, sizeof(a)) == STORE_OK &&
-		              store_resolve(STORE_TIER_PACKAGE, "bash-5.2.37-2.tar.gz", b, sizeof(b)) ==
+		CHECK(store_resolve("bash-5.2.37.tar.gz", a, sizeof(a)) == STORE_OK &&
+		              store_resolve("bash-5.2.37-2.tar.gz", b, sizeof(b)) ==
 		                      STORE_OK &&
 		              strcmp(a, b) == 0,
 		      "both names resolve to the same digest");

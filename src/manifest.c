@@ -5,30 +5,17 @@
 #include <stdio.h>
 #include <string.h>
 
-static int emit_entry(enum store_tier tier, const char *name, const char *digest, off_t size,
-                      void *ctx)
+static int emit_entry(const char *name, const char *digest, off_t size, void *ctx)
 {
 	struct json_writer *w = ctx;
 	char file[STORE_NAME_MAX + 16];
+	char key[STORE_NAME_MAX];
 
-	snprintf(file, sizeof(file), "%s/%s", store_tier_dir(tier), name);
-	if (tier == STORE_TIER_IMAGE) {
-		char image_name[STORE_NAME_MAX];
-		char version[STORE_SHA256_MAX];
-
-		store_split_display(tier, name, image_name, sizeof(image_name), version,
-		                    sizeof(version));
-		jw_key(w, image_name);
-		jw_obj_open(w);
-		jw_key(w, "version");
-		jw_str(w, version);
-	} else {
-		char key[STORE_NAME_MAX];
-
-		snprintf(key, sizeof(key), "%.*s", (int)(strlen(name) - 7), name);
-		jw_key(w, key);
-		jw_obj_open(w);
-	}
+	snprintf(file, sizeof(file), "%s/%s", STORE_DIR, name);
+	/* Keyed by name-version, without the .tar.gz suffix. */
+	snprintf(key, sizeof(key), "%.*s", (int)(strlen(name) - 7), name);
+	jw_key(w, key);
+	jw_obj_open(w);
 	jw_key(w, "file");
 	jw_str(w, file);
 	jw_key(w, "sha256");
@@ -41,14 +28,15 @@ static int emit_entry(enum store_tier tier, const char *name, const char *digest
 
 void manifest_write_json(struct json_writer *w)
 {
+	/*
+	 * The "packages" wrapper stays even though it is now the only
+	 * section, so anything already reading .packages keeps working.
+	 * The "images" key is simply gone -- see ADR-0006.
+	 */
 	jw_obj_open(w);
-	jw_key(w, "images");
-	jw_obj_open(w);
-	store_walk(STORE_TIER_IMAGE, emit_entry, w);
-	jw_obj_close(w);
 	jw_key(w, "packages");
 	jw_obj_open(w);
-	store_walk(STORE_TIER_PACKAGE, emit_entry, w);
+	store_walk(emit_entry, w);
 	jw_obj_close(w);
 	jw_obj_close(w);
 }

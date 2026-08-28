@@ -1,6 +1,12 @@
 # cixcache — a push/pull binary artifact registry for Cix
 
-**Status:** built. `cixcached`, `cixcachectl` and the dashboard implement
+**Status:** built, and since narrowed. The image tier this document
+describes was removed in v2.0.0 -- an image is a recipe composed of
+packages, so a whole-rootfs artifact duplicated bytes the package tier
+already held (ADR-0006). Everything below about the package tier, the
+two-URL split and the trust model stands unchanged.
+
+**Originally:** built. `cixcached`, `cixcachectl` and the dashboard implement
 this design; the hand-made static export it describes has been migrated
 into the content-addressed store. The decisions taken while implementing
 it -- and the two places reality differed from this brief -- are recorded

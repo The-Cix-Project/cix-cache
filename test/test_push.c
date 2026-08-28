@@ -23,16 +23,16 @@ static int g_failures;
 #define TOKEN "pushtoken"
 
 static int put(struct testserver *ts, const char *src, const char *name, const char *digest,
-               const char *token, int images)
+               const char *token)
 {
 	char cmd[1200];
 	char out[64];
 
 	snprintf(cmd, sizeof(cmd),
 	         "curl -s -o /dev/null -w '%%{http_code}' -X PUT -T '%s' "
-	         "%s%s%s -H 'X-Cix-Sha256: %s' 'http://127.0.0.1:%d/%s%s'",
+	         "%s%s%s -H 'X-Cix-Sha256: %s' 'http://127.0.0.1:%d/%s'",
 	         src, token != NULL ? "-H 'Authorization: Bearer " : "", token != NULL ? token : "",
-	         token != NULL ? "'" : "", digest, ts->port, images ? "images/" : "", name);
+	         token != NULL ? "'" : "", digest, ts->port, name);
 	ts_capture(cmd, out, sizeof(out));
 	return atoi(out);
 }
@@ -43,7 +43,6 @@ int main(void)
 	char b_path[300];
 	char a_digest[128];
 	char b_digest[128];
-	char image_name[256];
 	struct testserver ts;
 
 	memset(&ts, 0, sizeof(ts));
@@ -63,34 +62,34 @@ int main(void)
 	 * lets anyone fill the disk or plant blobs every puller then has
 	 * to reject.
 	 */
-	CHECK(put(&ts, a_path, "p-1.0.tar.gz", a_digest, NULL, 0) == 401, "unauthenticated push");
-	CHECK(put(&ts, a_path, "p-1.0.tar.gz", a_digest, "wrong", 0) == 401, "wrong token");
+	CHECK(put(&ts, a_path, "p-1.0.tar.gz", a_digest, NULL) == 401, "unauthenticated push");
+	CHECK(put(&ts, a_path, "p-1.0.tar.gz", a_digest, "wrong") == 401, "wrong token");
 	CHECK(ts_status(PORT, "GET", "/p-1.0.tar.gz", NULL) == 404, "nothing was stored");
 
-	CHECK(put(&ts, a_path, "p-1.0.tar.gz", a_digest, TOKEN, 0) == 201, "authenticated push");
+	CHECK(put(&ts, a_path, "p-1.0.tar.gz", a_digest, TOKEN) == 201, "authenticated push");
 	CHECK(ts_status(PORT, "GET", "/p-1.0.tar.gz", NULL) == 200, "pushed artifact is served");
 
 	/* Corruption is caught at the door rather than by every puller. */
-	CHECK(put(&ts, b_path, "q-1.0.tar.gz", a_digest, TOKEN, 0) == 400,
+	CHECK(put(&ts, b_path, "q-1.0.tar.gz", a_digest, TOKEN) == 400,
 	      "body not matching the declared digest is refused");
 	CHECK(ts_status(PORT, "GET", "/q-1.0.tar.gz", NULL) == 404, "refused push published nothing");
 
-	CHECK(put(&ts, a_path, "p-1.0.tar.gz", a_digest, TOKEN, 0) == 201,
+	CHECK(put(&ts, a_path, "p-1.0.tar.gz", a_digest, TOKEN) == 201,
 	      "republishing identical bytes is idempotent");
 
 	/*
 	 * The invariant: a recipe version is immutable in git, so a
 	 * published name may only ever mean one byte sequence.
 	 */
-	CHECK(put(&ts, b_path, "p-1.0.tar.gz", b_digest, TOKEN, 0) == 409,
+	CHECK(put(&ts, b_path, "p-1.0.tar.gz", b_digest, TOKEN) == 409,
 	      "republishing a name with different bytes conflicts");
 
-	/* Image names must carry a real 64-hex manifest hash. */
-	snprintf(image_name, sizeof(image_name),
-	         "dev-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef.tar.gz");
-	CHECK(put(&ts, a_path, image_name, a_digest, TOKEN, 1) == 201, "image push");
-	CHECK(put(&ts, a_path, "dev-1.0.tar.gz", a_digest, TOKEN, 1) == 400,
-	      "image name without a manifest hash is refused");
+	/*
+	 * There is no second tier any more: a path with a directory
+	 * component names nothing this registry has (ADR-0006).
+	 */
+	CHECK(put(&ts, a_path, "images/dev-1.0.tar.gz", a_digest, TOKEN) == 404,
+	      "a nested path is not an artifact name");
 
 	/*
 	 * Issue #1's bracket, verbatim. Small bodies fit under the header
@@ -118,7 +117,7 @@ int main(void)
 			ts_sha256(probe, pdigest, sizeof(pdigest));
 			snprintf(pname, sizeof(pname), "zz-probe-%ld.tar.gz", sizes[k]);
 			snprintf(msg, sizeof(msg), "push a %ld byte body", sizes[k]);
-			CHECK(put(&ts, probe, pname, pdigest, TOKEN, 0) == 201, msg);
+			CHECK(put(&ts, probe, pname, pdigest, TOKEN) == 201, msg);
 		}
 	}
 

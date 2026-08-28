@@ -23,11 +23,6 @@ const char *store_root(void)
 	return g_root;
 }
 
-const char *store_tier_dir(enum store_tier tier)
-{
-	return tier == STORE_TIER_IMAGE ? "images" : "packages";
-}
-
 const char *store_error_str(enum store_error e)
 {
 	switch (e) {
@@ -57,7 +52,7 @@ static int mkdir_if_absent(const char *path)
 
 int store_init(const char *root)
 {
-	static const char *subdirs[] = { "blobs", "packages", "images", "tmp" };
+	static const char *subdirs[] = { "blobs", STORE_DIR, "tmp" };
 	char path[PATH_MAX];
 	size_t i;
 
@@ -97,7 +92,7 @@ int store_digest_is_valid(const char *s)
 	return s[STORE_SHA256_HEX_LEN] == '\0';
 }
 
-int store_name_is_valid(enum store_tier tier, const char *name)
+int store_name_is_valid(const char *name)
 {
 	size_t len;
 	size_t i;
@@ -118,32 +113,11 @@ int store_name_is_valid(enum store_tier tier, const char *name)
 	}
 	if (len <= 7 || strcmp(name + len - 7, ".tar.gz") != 0)
 		return 0;
-	/*
-	 * An image artifact's filename is <name>-<image_version>.tar.gz
-	 * where image_version is sha256 of the image's sorted
-	 * "name@version,..." manifest -- computed on the host from recipe
-	 * text alone. Nothing else can ever be requested, so nothing else
-	 * is accepted.
-	 */
-	if (tier == STORE_TIER_IMAGE) {
-		size_t stem = len - 7;
-
-		if (stem < STORE_SHA256_HEX_LEN + 1)
-			return 0;
-		if (name[stem - STORE_SHA256_HEX_LEN - 1] != '-')
-			return 0;
-		for (i = stem - STORE_SHA256_HEX_LEN; i < stem; i++) {
-			char c = name[i];
-
-			if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
-				return 0;
-		}
-	}
 	return 1;
 }
 
-void store_split_display(enum store_tier tier, const char *name, char *out_name,
-                         size_t out_name_size, char *out_version, size_t out_version_size)
+void store_split_display(const char *name, char *out_name, size_t out_name_size, char *out_version,
+                         size_t out_version_size)
 {
 	size_t len = strlen(name);
 	size_t stem = len > 7 ? len - 7 : len;
@@ -151,14 +125,6 @@ void store_split_display(enum store_tier tier, const char *name, char *out_name,
 
 	out_name[0] = '\0';
 	out_version[0] = '\0';
-	if (tier == STORE_TIER_IMAGE && stem > STORE_SHA256_HEX_LEN) {
-		size_t base = stem - STORE_SHA256_HEX_LEN - 1;
-
-		snprintf(out_name, out_name_size, "%.*s", (int)base, name);
-		snprintf(out_version, out_version_size, "%.*s", STORE_SHA256_HEX_LEN,
-		         name + base + 1);
-		return;
-	}
 	for (i = 0; i + 1 < stem; i++) {
 		char next = name[i + 1];
 		int starts_version = (next >= '0' && next <= '9') ||
@@ -175,10 +141,9 @@ void store_split_display(enum store_tier tier, const char *name, char *out_name,
 	snprintf(out_name, out_name_size, "%.*s", (int)stem, name);
 }
 
-static int tier_entry_path(enum store_tier tier, const char *name, char *out, size_t out_size)
+static int entry_path(const char *name, char *out, size_t out_size)
 {
-	if ((size_t)snprintf(out, out_size, "%s/%s/%s", g_root, store_tier_dir(tier), name) >=
-	    out_size)
+	if ((size_t)snprintf(out, out_size, "%s/%s/%s", g_root, STORE_DIR, name) >= out_size)
 		return -1;
 	return 0;
 }
@@ -190,8 +155,7 @@ static int blob_path(const char *digest, char *out, size_t out_size)
 	return 0;
 }
 
-enum store_error store_resolve(enum store_tier tier, const char *name, char *out_digest,
-                               size_t out_digest_size)
+enum store_error store_resolve(const char *name, char *out_digest, size_t out_digest_size)
 {
 	char path[PATH_MAX];
 	char target[PATH_MAX];
@@ -200,9 +164,9 @@ enum store_error store_resolve(enum store_tier tier, const char *name, char *out
 
 	if (out_digest_size < STORE_SHA256_MAX)
 		return STORE_ERR_IO;
-	if (!store_name_is_valid(tier, name))
+	if (!store_name_is_valid(name))
 		return STORE_ERR_INVALID_NAME;
-	if (tier_entry_path(tier, name, path, sizeof(path)) != 0)
+	if (entry_path(name, path, sizeof(path)) != 0)
 		return STORE_ERR_INVALID_NAME;
 	n = readlink(path, target, sizeof(target) - 1);
 	if (n < 0)
@@ -217,8 +181,8 @@ enum store_error store_resolve(enum store_tier tier, const char *name, char *out
 	return STORE_OK;
 }
 
-enum store_error store_open(enum store_tier tier, const char *name, int *out_fd, off_t *out_size,
-                            char *out_digest, size_t out_digest_size)
+enum store_error store_open(const char *name, int *out_fd, off_t *out_size, char *out_digest,
+                            size_t out_digest_size)
 {
 	char digest[STORE_SHA256_MAX];
 	char path[PATH_MAX];
@@ -226,7 +190,7 @@ enum store_error store_open(enum store_tier tier, const char *name, int *out_fd,
 	struct stat st;
 	int fd;
 
-	e = store_resolve(tier, name, digest, sizeof(digest));
+	e = store_resolve(name, digest, sizeof(digest));
 	if (e != STORE_OK)
 		return e;
 	if (blob_path(digest, path, sizeof(path)) != 0)
@@ -288,7 +252,7 @@ enum store_error store_blob_adopt(const char *tmp_path, const char *digest)
 	return STORE_OK;
 }
 
-enum store_error store_publish(enum store_tier tier, const char *name, const char *digest)
+enum store_error store_publish(const char *name, const char *digest)
 {
 	char existing[STORE_SHA256_MAX];
 	char link_path[PATH_MAX];
@@ -296,14 +260,14 @@ enum store_error store_publish(enum store_tier tier, const char *name, const cha
 	char target[PATH_MAX];
 	enum store_error e;
 
-	if (!store_name_is_valid(tier, name))
+	if (!store_name_is_valid(name))
 		return STORE_ERR_INVALID_NAME;
 	if (!store_digest_is_valid(digest))
 		return STORE_ERR_IO;
 	if (!store_blob_exists(digest, NULL))
 		return STORE_ERR_NOT_FOUND;
 
-	e = store_resolve(tier, name, existing, sizeof(existing));
+	e = store_resolve(name, existing, sizeof(existing));
 	if (e == STORE_OK) {
 		if (strcmp(existing, digest) == 0)
 			return STORE_OK; /* idempotent republish of identical bytes */
@@ -312,7 +276,7 @@ enum store_error store_publish(enum store_tier tier, const char *name, const cha
 	if (e != STORE_ERR_NOT_FOUND)
 		return e;
 
-	if (tier_entry_path(tier, name, link_path, sizeof(link_path)) != 0)
+	if (entry_path(name, link_path, sizeof(link_path)) != 0)
 		return STORE_ERR_INVALID_NAME;
 	/* Relative, so the whole tree can be moved or served from anywhere. */
 	if ((size_t)snprintf(target, sizeof(target), "../blobs/%s", digest) >= sizeof(target))
@@ -334,13 +298,13 @@ enum store_error store_publish(enum store_tier tier, const char *name, const cha
 	return STORE_OK;
 }
 
-enum store_error store_unpublish(enum store_tier tier, const char *name)
+enum store_error store_unpublish(const char *name)
 {
 	char path[PATH_MAX];
 
-	if (!store_name_is_valid(tier, name))
+	if (!store_name_is_valid(name))
 		return STORE_ERR_INVALID_NAME;
-	if (tier_entry_path(tier, name, path, sizeof(path)) != 0)
+	if (entry_path(name, path, sizeof(path)) != 0)
 		return STORE_ERR_INVALID_NAME;
 	if (unlink(path) != 0)
 		return errno == ENOENT ? STORE_ERR_NOT_FOUND : STORE_ERR_IO;
@@ -404,17 +368,14 @@ int store_hash_file(const char *path, char *out, size_t out_size)
 	return store_digest_is_valid(out) ? 0 : -1;
 }
 
-int store_walk(enum store_tier tier,
-               int (*fn)(enum store_tier tier, const char *name, const char *digest, off_t size,
-                         void *ctx),
-               void *ctx)
+int store_walk(int (*fn)(const char *name, const char *digest, off_t size, void *ctx), void *ctx)
 {
 	char dir_path[PATH_MAX];
 	struct dirent *de;
 	DIR *d;
 	int rc = 0;
 
-	if ((size_t)snprintf(dir_path, sizeof(dir_path), "%s/%s", g_root, store_tier_dir(tier)) >=
+	if ((size_t)snprintf(dir_path, sizeof(dir_path), "%s/%s", g_root, STORE_DIR) >=
 	    sizeof(dir_path))
 		return -1;
 	d = opendir(dir_path);
@@ -426,12 +387,12 @@ int store_walk(enum store_tier tier,
 
 		if (de->d_name[0] == '.')
 			continue;
-		if (!store_name_is_valid(tier, de->d_name))
+		if (!store_name_is_valid(de->d_name))
 			continue;
-		if (store_resolve(tier, de->d_name, digest, sizeof(digest)) != STORE_OK)
+		if (store_resolve(de->d_name, digest, sizeof(digest)) != STORE_OK)
 			continue;
 		store_blob_exists(digest, &size);
-		rc = fn(tier, de->d_name, digest, size, ctx);
+		rc = fn(de->d_name, digest, size, ctx);
 		if (rc != 0)
 			break;
 	}
@@ -450,12 +411,10 @@ struct live_set {
 	size_t cap;
 };
 
-static int collect_live(enum store_tier tier, const char *name, const char *digest, off_t size,
-                        void *ctx)
+static int collect_live(const char *name, const char *digest, off_t size, void *ctx)
 {
 	struct live_set *set = ctx;
 
-	(void)tier;
 	(void)name;
 	(void)size;
 	if (set->count == set->cap) {
@@ -490,8 +449,7 @@ int store_gc(int dry_run, long long *out_bytes_freed)
 	 * every published entry first. That is the cost of the O(1)
 	 * digest lookup on the serving path, paid here where it is rare.
 	 */
-	if (store_walk(STORE_TIER_PACKAGE, collect_live, &set) != 0 ||
-	    store_walk(STORE_TIER_IMAGE, collect_live, &set) != 0) {
+	if (store_walk(collect_live, &set) != 0) {
 		free(set.slots);
 		return -1;
 	}

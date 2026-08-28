@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted. The image tier described here was removed in v2.0.0 --
+see ADR-0006. The store model, symlink publishing and name handling
+are unchanged.
 
 ## Context
 

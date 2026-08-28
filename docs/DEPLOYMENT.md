@@ -80,7 +80,7 @@ Add `--token=<push_token>` to `artifact-config set` if `pull_token` is set.
 
 ## Migrating a static export
 
-A hand-built export (plain tarballs under `packages/` and `images/`) is
+A hand-built export (plain tarballs under `packages/`) is
 converted in place into the content-addressed store. Everything is on one
 filesystem, so this is `rename()` only and the bytes are never copied.
 
@@ -112,7 +112,7 @@ cixcachectl manifest                      # MANIFEST.json, generated live
 cixcachectl gc --dry-run                  # what collection would remove
 cixcachectl gc --token=<t>                # remove unreferenced blobs
 cixcachectl rm NAME --token=<t>           # unpublish a name
-cixcachectl put FILE --name=N --sha256=H --token=<t> [--images]
+cixcachectl put FILE --name=N --sha256=H --token=<t>
 ```
 
 `rm` unpublishes a name; the blob survives until collected. A push whose
@@ -130,9 +130,6 @@ curl -fsSL http://<host>:8080/bash-5.2.37-2.tar.gz | sha256sum
 # should equal the recipe's pkg_artifact_sha256
 ```
 
-For an image, the filename's hash is the sha256 of the sorted
-`name@version,…` manifest string from the recipe, with no trailing newline:
-
-```
-printf '%s' 'bash@5.2.37,bc@1.08.1,...,zlib@1.3.2-3' | sha256sum
-```
+Packages are the only tier; `/images/...` is not served and never was
+after v2.0.0 (ADR-0006). A host applying an image recipe composes it from
+these packages.

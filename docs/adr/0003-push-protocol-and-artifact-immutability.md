@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted. The image-tier PUT/HEAD paths described here were removed
+in v2.0.0 -- see ADR-0006. The protocol, the auth asymmetry and the
+immutability rule are unchanged for the package tier.
 
 ## Context
 

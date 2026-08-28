@@ -27,8 +27,7 @@
 <!-- Menu bar: what the registry HOLDS. Changes only when something is
      published or collected. -->
 <header>
-	<span class="stat"><b id="m-packages">&mdash;</b> packages</span>
-	<span class="stat"><b id="m-images">&mdash;</b> images</span>
+	<span class="stat"><b id="m-packages">&mdash;</b> artifacts</span>
 	<span class="stat"><b id="m-bytes">&mdash;</b></span>
 	<span class="spacer"></span>
 	<button id="btn-maint" class="icon" title="Maintenance" aria-label="Maintenance">
@@ -52,10 +51,6 @@
 		</div>
 
 		<div class="chips">
-			<button class="chip tier-btn is-on" data-tier="">all</button>
-			<button class="chip tier-btn" data-tier="images">images</button>
-			<button class="chip tier-btn" data-tier="packages">packages</button>
-			<span class="chip-sep"></span>
 			<button class="chip" id="btn-browse">browse everything</button>
 		</div>
 
@@ -65,7 +60,6 @@
 				<table>
 					<thead>
 						<tr>
-							<th>Tier</th>
 							<th>Artifact</th>
 							<th>Version</th>
 							<th class="num">Size</th>

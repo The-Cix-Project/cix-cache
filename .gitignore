@@ -5,7 +5,6 @@
 cache/blobs/
 cache/tmp/
 cache/packages/*.tar.gz
-cache/images/*.tar.gz
 cache/*.tar.gz
 
 # Build output

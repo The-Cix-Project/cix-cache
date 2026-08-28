@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Accepted. The image rows in the wire-contract table below were
+removed in v2.0.0 -- see ADR-0006. The invariant itself is unchanged
+and ADR-0006 follows from it.
 
 ## Context
 

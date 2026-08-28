@@ -149,11 +149,11 @@ static void fmt_status(const struct json_value *v)
 	 * paths looks identical to an empty one from the outside: every
 	 * request 404s and every host silently rebuilds from source.
 	 */
-	fprintf(g_out, "artifacts: %lld hit, %lld missed\n", int_field(v, "artifact_hits"),
-	       int_field(v, "artifact_misses"));
+	fprintf(g_out, "lookups:   %lld hit, %lld missed\n", int_field(v, "artifact_hits"),
+	        int_field(v, "artifact_misses"));
 	fprintf(g_out, "served:    %lld bytes\n", int_field(v, "served_bytes"));
-	fprintf(g_out, "packages:  %lld (%lld bytes)\n", int_field(v, "packages"), int_field(v, "package_bytes"));
-	fprintf(g_out, "images:    %lld (%lld bytes)\n", int_field(v, "images"), int_field(v, "image_bytes"));
+	fprintf(g_out, "artifacts: %lld (%lld bytes)\n", int_field(v, "packages"),
+	        int_field(v, "package_bytes"));
 	fprintf(g_out, "pull:      %s\n", bool_field(v, "pull_open") ? "open" : "token required");
 	fprintf(g_out, "push:      %s\n", bool_field(v, "push_configured") ? "token required" : "OPEN");
 }
@@ -163,21 +163,13 @@ static void fmt_artifact_line(const struct json_value *v)
 	const char *version = str_field(v, "version");
 	char size[16];
 
-	const char *tier = str_field(v, "tier");
-
 	human_bytes(int_field(v, "bytes"), size, sizeof(size));
 	/*
 	 * Name and version in their own columns, and no URL column: the
-	 * URL is the name, under images/ for that tier and at the root for
-	 * the other. Printing both just makes the line too wide to read.
-	 *
-	 * An image's "version" is a 64-character manifest hash, so it is
-	 * shown truncated; the full value is in --json.
+	 * URL is the name, at the root of base_url. Printing both just
+	 * makes the line too wide to read.
 	 */
-	/* "image"/"pkg" rather than the directory names, so the column
-	 * stays narrow enough not to push every other one out of line. */
-	fprintf(g_out, "%-5s %-18s %-22.22s %8s  %.12s\n",
-	        strcmp(tier, "images") == 0 ? "image" : "pkg", str_field(v, "artifact"),
+	fprintf(g_out, "%-22s %-24.24s %9s  %.12s\n", str_field(v, "artifact"),
 	        version[0] != '\0' ? version : "-", size, str_field(v, "sha256"));
 }
 
@@ -189,8 +181,7 @@ static void fmt_artifacts(const struct json_value *v)
 
 	if (arr == NULL || arr->type != JSON_ARRAY)
 		return;
-	fprintf(g_out, "%-5s %-18s %-22s %8s  %s\n", "TIER", "ARTIFACT", "VERSION", "SIZE",
-	        "SHA256");
+	fprintf(g_out, "%-22s %-24s %9s  %s\n", "ARTIFACT", "VERSION", "SIZE", "SHA256");
 	for (i = 0; i < arr->u.array.count; i++)
 		fmt_artifact_line(arr->u.array.items[i]);
 	human_bytes(int_field(v, "bytes"), total, sizeof(total));
@@ -259,7 +250,6 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 	char req[1024];
 	struct stat st;
 	long long sent = 0;
-	int images = 0;
 	int fd;
 	int sock;
 	int status = 0;
@@ -272,8 +262,6 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 			digest = argv[i] + 9;
 		else if (strncmp(argv[i], "--token=", 8) == 0)
 			token = argv[i] + 8;
-		else if (strcmp(argv[i], "--images") == 0)
-			images = 1;
 		else if (strncmp(argv[i], "--", 2) == 0) {
 			fprintf(stderr, "cixcachectl: unknown put option '%s'\n", argv[i]);
 			return 2;
@@ -285,8 +273,8 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 		}
 	}
 	if (path == NULL || name == NULL || digest == NULL) {
-		fprintf(stderr, "usage: cixcachectl put FILE --name=NAME.tar.gz --sha256=HEX\n"
-		                "                         [--images] [--token=TOK]\n");
+		fprintf(stderr,
+		        "usage: cixcachectl put FILE --name=NAME.tar.gz --sha256=HEX [--token=TOK]\n");
 		return 2;
 	}
 	fd = open(path, O_RDONLY);
@@ -299,7 +287,7 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 		fprintf(stderr, "cixcachectl: cannot stat %s\n", path);
 		return 1;
 	}
-	snprintf(url, sizeof(url), "%s%s", images ? "/images/" : "/", name);
+	snprintf(url, sizeof(url), "/%s", name);
 	sock = cix_client_connect_raw(c);
 	if (sock < 0) {
 		close(fd);
@@ -423,8 +411,8 @@ static void usage(FILE *out)
 	        "  gc [--dry-run] [--token=]  remove blobs no name points at\n"
 	        "  import [--token=]          migrate a static export into the store\n"
 	        "  import-status              progress of a running import\n"
-	        "  put FILE --name=N --sha256=H [--images] [--token=]\n"
-	        "  rm NAME [--images] [--token=]\n");
+	        "  put FILE --name=N --sha256=H [--token=]\n"
+	        "  rm NAME [--token=]\n");
 }
 
 static int dispatch_command(const struct cix_client *c, int json_mode, const char *cmd, int argc,
@@ -432,7 +420,6 @@ static int dispatch_command(const struct cix_client *c, int json_mode, const cha
 {
 	const char *token = NULL;
 	int dry_run = 0;
-	int images = 0;
 	int follow = 0;
 	int i;
 
@@ -441,8 +428,6 @@ static int dispatch_command(const struct cix_client *c, int json_mode, const cha
 			token = argv[i] + 8;
 		else if (strcmp(argv[i], "--dry-run") == 0)
 			dry_run = 1;
-		else if (strcmp(argv[i], "--images") == 0)
-			images = 1;
 		else if (strcmp(argv[i], "--follow") == 0 || strcmp(argv[i], "-f") == 0)
 			follow = 1;
 	}
@@ -470,10 +455,10 @@ static int dispatch_command(const struct cix_client *c, int json_mode, const cha
 		char path[600];
 
 		if (argc < 1 || argv[0][0] == '-') {
-			fprintf(stderr, "usage: cixcachectl rm NAME [--images] [--token=TOK]\n");
+			fprintf(stderr, "usage: cixcachectl rm NAME [--token=TOK]\n");
 			return 2;
 		}
-		snprintf(path, sizeof(path), "%s%s", images ? "/images/" : "/", argv[0]);
+		snprintf(path, sizeof(path), "/%s", argv[0]);
 		return one_call(c, json_mode, "DELETE", path, token, fmt_removed, 0);
 	}
 	fprintf(stderr, "cixcachectl: unknown command '%s'\n", cmd);

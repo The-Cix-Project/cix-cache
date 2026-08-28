@@ -36,25 +36,16 @@ static void write_file(const char *path, const char *content)
 
 static void test_names(void)
 {
-	char image[256];
+	CHECK(store_name_is_valid("bash-5.2.37-2.tar.gz"), "plain package name");
+	CHECK(store_name_is_valid("libc-dev-2.36.tar.gz"), "hyphenated package");
+	CHECK(store_name_is_valid("nss-pam-ldapd-0.9.13-2.tar.gz"), "multi-hyphen package");
 
-	CHECK(store_name_is_valid(STORE_TIER_PACKAGE, "bash-5.2.37-2.tar.gz"), "plain package name");
-	CHECK(store_name_is_valid(STORE_TIER_PACKAGE, "libc-dev-2.36.tar.gz"), "hyphenated package");
-	CHECK(store_name_is_valid(STORE_TIER_PACKAGE, "nss-pam-ldapd-0.9.13-2.tar.gz"),
-	      "multi-hyphen package");
-
-	CHECK(!store_name_is_valid(STORE_TIER_PACKAGE, "../etc/passwd.tar.gz"), "traversal rejected");
-	CHECK(!store_name_is_valid(STORE_TIER_PACKAGE, "a/b.tar.gz"), "slash rejected");
-	CHECK(!store_name_is_valid(STORE_TIER_PACKAGE, ".hidden.tar.gz"), "leading dot rejected");
-	CHECK(!store_name_is_valid(STORE_TIER_PACKAGE, "bash-5.2.37.tar"), "wrong suffix rejected");
-	CHECK(!store_name_is_valid(STORE_TIER_PACKAGE, "bash 5.tar.gz"), "space rejected");
-	CHECK(!store_name_is_valid(STORE_TIER_PACKAGE, "bash%2e.tar.gz"), "percent rejected");
-
-	snprintf(image, sizeof(image), "dev-%s.tar.gz", HEX64);
-	CHECK(store_name_is_valid(STORE_TIER_IMAGE, image), "image with 64 hex accepted");
-	CHECK(!store_name_is_valid(STORE_TIER_IMAGE, "dev-1.0.0.tar.gz"),
-	      "image without manifest hash rejected");
-	CHECK(!store_name_is_valid(STORE_TIER_IMAGE, "dev-ZZZ.tar.gz"), "image with non-hex rejected");
+	CHECK(!store_name_is_valid("../etc/passwd.tar.gz"), "traversal rejected");
+	CHECK(!store_name_is_valid("a/b.tar.gz"), "slash rejected");
+	CHECK(!store_name_is_valid(".hidden.tar.gz"), "leading dot rejected");
+	CHECK(!store_name_is_valid("bash-5.2.37.tar"), "wrong suffix rejected");
+	CHECK(!store_name_is_valid("bash 5.tar.gz"), "space rejected");
+	CHECK(!store_name_is_valid("bash%2e.tar.gz"), "percent rejected");
 
 	CHECK(store_digest_is_valid(HEX64), "64 hex is a digest");
 	CHECK(!store_digest_is_valid("abc"), "short string is not a digest");
@@ -93,22 +84,10 @@ static void test_split_display(void)
 	for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
 		char msg[160];
 
-		store_split_display(STORE_TIER_PACKAGE, cases[i].file, name, sizeof(name), version,
-		                    sizeof(version));
+		store_split_display(cases[i].file, name, sizeof(name), version, sizeof(version));
 		snprintf(msg, sizeof(msg), "%s splits to '%s' + '%s' (got '%s' + '%s')", cases[i].file,
 		         cases[i].name, cases[i].version, name, version);
 		CHECK(strcmp(name, cases[i].name) == 0 && strcmp(version, cases[i].version) == 0, msg);
-	}
-
-	/* Images are exact rather than inferred: the hash is fixed-width. */
-	{
-		char image[256];
-
-		snprintf(image, sizeof(image), "cix-hosttools-%s.tar.gz", HEX64);
-		store_split_display(STORE_TIER_IMAGE, image, name, sizeof(name), version,
-		                    sizeof(version));
-		CHECK(strcmp(name, "cix-hosttools") == 0, "image name splits at the manifest hash");
-		CHECK(strcmp(version, HEX64) == 0, "image version is the manifest hash");
 	}
 }
 
@@ -133,17 +112,17 @@ static void test_publish(const char *root)
 	CHECK(access(blob, F_OK) == 0, "blob landed under blobs/");
 	CHECK(access(tmp, F_OK) != 0, "temp file was moved, not copied");
 
-	CHECK(store_publish(STORE_TIER_PACKAGE, "one-1.0.tar.gz", digest_a) == STORE_OK, "publish");
-	CHECK(store_resolve(STORE_TIER_PACKAGE, "one-1.0.tar.gz", got, sizeof(got)) == STORE_OK,
+	CHECK(store_publish("one-1.0.tar.gz", digest_a) == STORE_OK, "publish");
+	CHECK(store_resolve("one-1.0.tar.gz", got, sizeof(got)) == STORE_OK,
 	      "resolve a published name");
 	CHECK(strcmp(got, digest_a) == 0, "resolve returns the digest it was published with");
 
 	/* Republishing identical bytes is a no-op, not a conflict. */
-	CHECK(store_publish(STORE_TIER_PACKAGE, "one-1.0.tar.gz", digest_a) == STORE_OK,
+	CHECK(store_publish("one-1.0.tar.gz", digest_a) == STORE_OK,
 	      "idempotent republish");
 
 	/* Two names, same bytes: one blob. That is the point of the store. */
-	CHECK(store_publish(STORE_TIER_PACKAGE, "one-alias-1.0.tar.gz", digest_a) == STORE_OK,
+	CHECK(store_publish("one-alias-1.0.tar.gz", digest_a) == STORE_OK,
 	      "second name onto the same blob");
 
 	snprintf(tmp, sizeof(tmp), "%s/tmp/b", root);
@@ -156,18 +135,18 @@ static void test_publish(const char *root)
 	 * A recipe version is immutable in git, so a published name may
 	 * only ever mean one byte sequence.
 	 */
-	CHECK(store_publish(STORE_TIER_PACKAGE, "one-1.0.tar.gz", digest_b) == STORE_ERR_CONFLICT,
+	CHECK(store_publish("one-1.0.tar.gz", digest_b) == STORE_ERR_CONFLICT,
 	      "republish with different bytes is a conflict");
-	CHECK(store_resolve(STORE_TIER_PACKAGE, "one-1.0.tar.gz", got, sizeof(got)) == STORE_OK &&
+	CHECK(store_resolve("one-1.0.tar.gz", got, sizeof(got)) == STORE_OK &&
 	              strcmp(got, digest_a) == 0,
 	      "a rejected republish did not disturb the existing name");
 
-	CHECK(store_open(STORE_TIER_PACKAGE, "one-1.0.tar.gz", &fd, &size, got, sizeof(got)) ==
+	CHECK(store_open("one-1.0.tar.gz", &fd, &size, got, sizeof(got)) ==
 	              STORE_OK,
 	      "open a published artifact");
 	if (fd >= 0)
 		close(fd);
-	CHECK(store_resolve(STORE_TIER_PACKAGE, "absent-9.9.tar.gz", got, sizeof(got)) ==
+	CHECK(store_resolve("absent-9.9.tar.gz", got, sizeof(got)) ==
 	              STORE_ERR_NOT_FOUND,
 	      "a miss is NOT_FOUND, not an error");
 }
@@ -199,7 +178,7 @@ static void test_gc(const char *root)
 	removed = store_gc(0, &freed);
 	CHECK(removed == 2, "gc removes both orphans");
 	CHECK(!store_blob_exists(digest, NULL), "orphan blob is gone");
-	CHECK(store_resolve(STORE_TIER_PACKAGE, "one-1.0.tar.gz", digest, sizeof(digest)) == STORE_OK,
+	CHECK(store_resolve("one-1.0.tar.gz", digest, sizeof(digest)) == STORE_OK,
 	      "gc left published blobs alone");
 }
 
