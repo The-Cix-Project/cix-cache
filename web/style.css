@@ -308,6 +308,9 @@ tbody tr:hover {
 	background: var(--hover);
 }
 
+/* A right-aligned column needs its heading right-aligned too, or the
+ * label floats away from the values it names. */
+th.num,
 td.num {
 	text-align: right;
 	font-variant-numeric: tabular-nums;

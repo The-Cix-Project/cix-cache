@@ -182,8 +182,8 @@ static void fmt_artifact_line(const struct json_value *v)
 	 * URL is the name, at the root of base_url. Printing both just
 	 * makes the line too wide to read.
 	 */
-	fprintf(g_out, "%-22s %-20.20s %9s  %-10s  %.12s\n", str_field(v, "artifact"),
-	        version[0] != '\0' ? version : "-", size, when, str_field(v, "sha256"));
+	fprintf(g_out, "%-18s %12.12s %9s  %.12s  %10s\n", str_field(v, "artifact"),
+	        version[0] != '\0' ? version : "-", size, str_field(v, "sha256"), when);
 }
 
 static void fmt_artifacts(const struct json_value *v)
@@ -194,8 +194,8 @@ static void fmt_artifacts(const struct json_value *v)
 
 	if (arr == NULL || arr->type != JSON_ARRAY)
 		return;
-	fprintf(g_out, "%-22s %-20s %9s  %-10s  %s\n", "ARTIFACT", "VERSION", "SIZE", "PUBLISHED",
-	        "SHA256");
+	fprintf(g_out, "%-18s %12s %9s  %-12s  %10s\n", "ARTIFACT", "VERSION", "SIZE", "SHA256",
+	        "PUBLISHED");
 	for (i = 0; i < arr->u.array.count; i++)
 		fmt_artifact_line(arr->u.array.items[i]);
 	human_bytes(int_field(v, "bytes"), total, sizeof(total));

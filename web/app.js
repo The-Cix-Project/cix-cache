@@ -181,7 +181,7 @@ function resultRow(a) {
 	row.appendChild(nameCell);
 
 	const versionCell = document.createElement("td");
-	versionCell.className = "mono";
+	versionCell.className = "mono num";
 	versionCell.textContent = a.version || "-";
 	row.appendChild(versionCell);
 
@@ -189,19 +189,6 @@ function resultRow(a) {
 	sizeCell.className = "num";
 	sizeCell.textContent = a.bytes < 0 ? "dangling" : humanBytes(a.bytes);
 	row.appendChild(sizeCell);
-
-	/* When this NAME was published here, not when the bytes were built. */
-	const whenCell = document.createElement("td");
-	whenCell.className = "muted";
-	if (a.modified > 0) {
-		const d = new Date(a.modified * 1000);
-
-		whenCell.textContent = d.toISOString().substring(0, 10);
-		whenCell.title = d.toLocaleString();
-	} else {
-		whenCell.textContent = "-";
-	}
-	row.appendChild(whenCell);
 
 	const digestCell = document.createElement("td");
 	const digest = document.createElement("span");
@@ -211,6 +198,20 @@ function resultRow(a) {
 	digest.addEventListener("click", () => copyDigest(a.sha256));
 	digestCell.appendChild(digest);
 	row.appendChild(digestCell);
+
+	/* When this NAME was published here, not when the bytes were built. */
+	const whenCell = document.createElement("td");
+
+	whenCell.className = "muted num";
+	if (a.modified > 0) {
+		const d = new Date(a.modified * 1000);
+
+		whenCell.textContent = d.toISOString().substring(0, 10);
+		whenCell.title = d.toLocaleString();
+	} else {
+		whenCell.textContent = "-";
+	}
+	row.appendChild(whenCell);
 
 	return row;
 }
