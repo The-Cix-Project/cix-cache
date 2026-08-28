@@ -31,6 +31,9 @@
 	<span class="stat"><b id="m-packages">&mdash;</b> artifacts</span>
 	<span class="stat"><b id="m-bytes">&mdash;</b></span>
 	<span class="spacer"></span>
+	<button id="btn-help" class="icon" title="Help and API reference" aria-label="Help">
+		<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.5 2.5 0 1 1 3.3 2.4c-.6.2-.9.8-.9 1.4v.5"/><path d="M12 17.2v.01"/></svg>
+	</button>
 	<button id="btn-maint" class="icon" title="Maintenance" aria-label="Maintenance">
 		<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7z"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-2.9 1.2 2 2 0 1 1-4 0 1.7 1.7 0 0 0-2.9-1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.7 1.7 0 0 0 3 15a2 2 0 1 1 0-4 1.7 1.7 0 0 0 1.2-2.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1A1.7 1.7 0 0 0 10 4.1a2 2 0 1 1 4 0 1.7 1.7 0 0 0 2.9 1.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1A1.7 1.7 0 0 0 21 11a2 2 0 1 1 0 4z"/></svg>
 	</button>
@@ -39,7 +42,7 @@
 	</button>
 </header>
 
-<main>
+<main id="main-view">
 	<div class="search-wrap">
 		<h1 class="wordmark">cix<span>-cache</span></h1>
 		<div class="search-box">
@@ -86,6 +89,150 @@
 		</p>
 	</div>
 </main>
+
+<!-- Help: routed at #help so it can be linked, and so Back closes it. -->
+<section id="help" hidden>
+	<nav class="help-nav">
+		<div class="help-title">Reference</div>
+		<a href="#help-start">Getting started</a>
+		<a href="#help-fetch">Fetching artifacts</a>
+		<a href="#help-publish">Publishing</a>
+		<a href="#help-api">Operator API</a>
+		<a href="#help-cli">Command line</a>
+		<a href="#help-store">How the store works</a>
+		<a href="#help-invariant">What this is not</a>
+		<button id="help-close">close</button>
+	</nav>
+
+	<div class="help-body">
+		<h2 id="help-start">Getting started</h2>
+		<p>
+			cix-cache serves precompiled Cix package artifacts over the exact URLs an
+			unmodified Cix host already requests, so a new box installs packages instead
+			of rebuilding them from source.
+		</p>
+		<p>Point a host at it. The binaries and the recipes are two separate URLs, deliberately:</p>
+		<pre><code># binaries -- this server
+cixctl --host=&lt;box&gt; pkg artifact-config set --url=http://&lt;this-host&gt;:8080
+
+# recipes -- git, separately
+cixctl --host=&lt;box&gt; pkg repo-config set --repo-url=https://git.home.arpa/itdlabs/cix.git
+cixctl --host=&lt;box&gt; pkg sync</code></pre>
+		<p class="note">
+			Watch <code>Server activity</code> at the bottom of this page during the first
+			install. A <span class="tag warn">MISS</span> naming a URL you expected to hit is
+			the fastest way to spot a wrong base URL &mdash; a miss is harmless by design, so
+			it is otherwise invisible.
+		</p>
+
+		<h2 id="help-fetch">Fetching artifacts</h2>
+		<p>Every artifact lives at the root of the base URL. There is no other path shape.</p>
+		<table class="help-table">
+			<tr><td><span class="tag">GET</span></td><td><code>/&lt;name&gt;-&lt;version&gt;.tar.gz</code></td><td>the artifact</td></tr>
+			<tr><td><span class="tag">HEAD</span></td><td><code>/&lt;name&gt;-&lt;version&gt;.tar.gz</code></td><td>size and digest, no body</td></tr>
+		</table>
+		<pre><code>curl -fsSL http://&lt;host&gt;:8080/bc-1.08.1-2.tar.gz | sha256sum
+# equals the recipe's pkg_artifact_sha256</code></pre>
+		<p>
+			Pull is open unless <code>pull_token</code> is set, because a consumer verifies
+			every byte against a checksum that came from git. A <span class="tag">404</span>
+			is an ordinary answer meaning &ldquo;build it from source&rdquo;.
+		</p>
+
+		<h2 id="help-publish">Publishing</h2>
+		<p>
+			A push declares its digest up front. The body streams to disk, is hashed there,
+			and is only then adopted and published.
+		</p>
+		<pre><code>curl -X PUT -T bash-5.2.37-2.tar.gz \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "X-Cix-Sha256: 47f08a7eac65b59ce6e6a211ffcf7754..." \
+  http://&lt;host&gt;:8080/bash-5.2.37-2.tar.gz</code></pre>
+		<table class="help-table">
+			<tr><td><span class="tag ok">201</span></td><td colspan="2">published</td></tr>
+			<tr><td><span class="tag warn">400</span></td><td colspan="2">body does not match the declared sha256, or the name is malformed</td></tr>
+			<tr><td><span class="tag warn">401</span></td><td colspan="2">missing or wrong token &mdash; push always needs one</td></tr>
+			<tr><td><span class="tag warn">409</span></td><td colspan="2">that name already exists with <em>different</em> bytes</td></tr>
+			<tr><td><span class="tag warn">411</span></td><td colspan="2">no <code>Content-Length</code></td></tr>
+		</table>
+		<p>
+			Re-pushing identical bytes is an idempotent <span class="tag ok">201</span>.
+			The <span class="tag warn">409</span> only fires on a real content change: a
+			recipe version is frozen in git, so a published name may only ever mean one byte
+			sequence. To genuinely replace something, <code>DELETE</code> the name and push
+			again.
+		</p>
+		<p>
+			<code>DELETE /&lt;name&gt;.tar.gz</code> unpublishes a name. The bytes survive until
+			collected, because another name may share them.
+		</p>
+
+		<h2 id="help-api">Operator API</h2>
+		<table class="help-table">
+			<tr><td><span class="tag">GET</span></td><td><code>/MANIFEST.json</code></td><td>generated from the tree, never stored</td></tr>
+			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/status</code></td><td>counts, uptime, hit/miss, config summary</td></tr>
+			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/artifacts</code></td><td>everything published</td></tr>
+			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/log?after=&lt;seq&gt;</code></td><td>activity since a sequence number</td></tr>
+			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/gc</code></td><td>dry run &mdash; what collection would remove</td></tr>
+			<tr><td><span class="tag warn">POST</span></td><td><code>/api/v1/gc</code></td><td>collect unreferenced blobs</td></tr>
+			<tr><td><span class="tag warn">POST</span></td><td><code>/api/v1/import</code></td><td>migrate a static export into the store</td></tr>
+			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/import-status</code></td><td>progress of a running import</td></tr>
+		</table>
+		<p class="note">Anything marked <span class="tag warn">POST</span> needs the push token.</p>
+
+		<h2 id="help-cli">Command line</h2>
+		<pre><code>cixcachectl [--host=H] [--port=N] [--json] &lt;command&gt;
+
+  status                     server and store summary
+  ls                         every published artifact, paged
+  manifest                   MANIFEST.json, generated live
+  log [-f]                   what the server has been doing
+  gc [--dry-run] [--token=]  remove blobs no name points at
+  import [--token=]          migrate a static export
+  import-status              progress of a running import
+  put FILE --name=N --sha256=H [--token=]
+  rm NAME [--token=]</code></pre>
+		<p>
+			Exit codes: <code>0</code> success, <code>1</code> the server refused or was
+			unreachable, <code>2</code> a usage error. List output pages through
+			<code>$PAGER</code> when stdout is a terminal and is left alone when piped.
+		</p>
+
+		<h2 id="help-store">How the store works</h2>
+		<pre><code>cache/
+  blobs/&lt;sha256&gt;                    the bytes, mode 0444
+  packages/&lt;name&gt;-&lt;version&gt;.tar.gz  -&gt; ../blobs/&lt;sha256&gt;
+  tmp/                              upload staging</code></pre>
+		<p>
+			Published names are symlinks, and the link target <em>is</em> the digest. So a
+			name's checksum and size are known without an index that could drift, and without
+			re-reading the file. Identical bytes under two names cost one copy &mdash; this
+			store holds several revisions of most packages.
+		</p>
+		<p>
+			Because a symlink carries no reference count, collection builds the live set by
+			reading every published entry and removes the blobs outside it. Unpublishing a
+			name therefore does not free space until a <code>gc</code>.
+		</p>
+
+		<h2 id="help-invariant">What this is not</h2>
+		<p>
+			<strong>Not a trust boundary.</strong> Recipes come from git, artifacts come from
+			here, and the recipe's checksum approves the bytes. A registry that served both
+			would be vouching for its own payload, which is worth nothing.
+		</p>
+		<p>
+			<strong>Not a catalogue.</strong> This listing is for operators. No Cix host code
+			path may consult it &mdash; a host fetches one exact name it already learned from a
+			recipe. Losing this store entirely must cost rebuild time and nothing else.
+		</p>
+		<p>
+			<strong>Not images.</strong> An image is a recipe composed of packages, so a
+			whole-rootfs artifact would duplicate bytes already here. Hosts compose images from
+			these packages.
+		</p>
+	</div>
+</section>
 
 <!-- Maintenance popover, anchored to the menu bar -->
 <div id="maint" class="popover" hidden>

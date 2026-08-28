@@ -463,14 +463,47 @@ function openLog() {
  * operator was looking for.
  */
 function syncHash() {
+	if (helpOpen())
+		return;
 	const want = query ? "#q=" + encodeURIComponent(query) : "";
 
 	if (window.location.hash !== want)
 		history.replaceState(null, "", window.location.pathname + want);
 }
 
+function helpOpen() {
+	return !el("help").hidden;
+}
+
+/*
+ * Help is a route, not a dialog: it can be linked, and Back closes it.
+ * Deep links to a section (#help-publish) open it scrolled there.
+ */
+function setHelp(open, anchor) {
+	el("help").hidden = !open;
+	el("main-view").hidden = open;
+	if (!open)
+		return;
+	if (anchor) {
+		const target = document.getElementById(anchor);
+
+		if (target !== null)
+			target.scrollIntoView();
+	} else {
+		el("help").querySelector(".help-body").scrollTop = 0;
+	}
+}
+
 function readHash() {
-	const m = /^#q=(.*)$/.exec(window.location.hash);
+	const h = window.location.hash;
+
+	if (h === "#help" || h.indexOf("#help-") === 0) {
+		setHelp(1, h.substring(1));
+		return;
+	}
+	setHelp(0, null);
+
+	const m = /^#q=(.*)$/.exec(h);
 
 	if (m === null)
 		return;
@@ -536,6 +569,22 @@ el("log-clear").addEventListener("click", () => {
 	el("log").textContent = "";
 });
 
+el("btn-help").addEventListener("click", () => {
+	if (helpOpen()) {
+		history.replaceState(null, "", window.location.pathname);
+		readHash();
+	} else {
+		window.location.hash = "help";
+	}
+});
+
+el("help-close").addEventListener("click", () => {
+	history.replaceState(null, "", window.location.pathname);
+	setHelp(0, null);
+});
+
+window.addEventListener("hashchange", readHash);
+
 el("btn-maint").addEventListener("click", (e) => {
 	e.stopPropagation();
 	el("maint").hidden = !el("maint").hidden;
@@ -589,10 +638,16 @@ window.matchMedia("(prefers-color-scheme: dark)")
 
 /* "/" focuses the search from anywhere, as a search-first page should. */
 document.addEventListener("keydown", (e) => {
-	if (e.key === "/" && document.activeElement !== el("q")) {
+	if (e.key === "/" && document.activeElement !== el("q") && !helpOpen()) {
 		e.preventDefault();
 		el("q").focus();
 	}
+	if (e.key === "Escape" && helpOpen()) {
+		history.replaceState(null, "", window.location.pathname);
+		setHelp(0, null);
+	}
+	if (e.key === "?" && document.activeElement !== el("q"))
+		window.location.hash = "help";
 });
 
 renderThemeIcon();

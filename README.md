@@ -83,6 +83,9 @@ for t in store http manifest import serve push gc; do build/test_$t; done
 
 ## Documentation
 
+The dashboard carries its own reference at `/#help` — endpoints, status
+codes, CLI commands and how the store works.
+
 - `docs/DESIGN.md` — the original design brief and its reasoning
 - `docs/DEPLOYMENT.md` — running it, and pointing hosts at it
 - `docs/adr/` — why the store, the reactor and the push protocol are shaped
