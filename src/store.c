@@ -368,7 +368,8 @@ int store_hash_file(const char *path, char *out, size_t out_size)
 	return store_digest_is_valid(out) ? 0 : -1;
 }
 
-int store_walk(int (*fn)(const char *name, const char *digest, off_t size, void *ctx), void *ctx)
+int store_walk(int (*fn)(const char *name, const char *digest, off_t size, time_t mtime, void *ctx),
+               void *ctx)
 {
 	char dir_path[PATH_MAX];
 	struct dirent *de;
@@ -383,6 +384,9 @@ int store_walk(int (*fn)(const char *name, const char *digest, off_t size, void 
 		return -1;
 	while ((de = readdir(d)) != NULL) {
 		char digest[STORE_SHA256_MAX];
+		char link_path[PATH_MAX];
+		struct stat lst;
+		time_t mtime = 0;
 		off_t size = -1;
 
 		if (de->d_name[0] == '.')
@@ -392,7 +396,10 @@ int store_walk(int (*fn)(const char *name, const char *digest, off_t size, void 
 		if (store_resolve(de->d_name, digest, sizeof(digest)) != STORE_OK)
 			continue;
 		store_blob_exists(digest, &size);
-		rc = fn(de->d_name, digest, size, ctx);
+		if (entry_path(de->d_name, link_path, sizeof(link_path)) == 0 &&
+		    lstat(link_path, &lst) == 0)
+			mtime = lst.st_mtime;
+		rc = fn(de->d_name, digest, size, mtime, ctx);
 		if (rc != 0)
 			break;
 	}
@@ -411,12 +418,13 @@ struct live_set {
 	size_t cap;
 };
 
-static int collect_live(const char *name, const char *digest, off_t size, void *ctx)
+static int collect_live(const char *name, const char *digest, off_t size, time_t mtime, void *ctx)
 {
 	struct live_set *set = ctx;
 
 	(void)name;
 	(void)size;
+	(void)mtime;
 	if (set->count == set->cap) {
 		size_t cap = set->cap != 0 ? set->cap * 2 : 64;
 		char *grown = realloc(set->slots, cap * STORE_SHA256_MAX);

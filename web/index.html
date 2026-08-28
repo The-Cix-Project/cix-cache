@@ -27,6 +27,7 @@
 <!-- Menu bar: what the registry HOLDS. Changes only when something is
      published or collected. -->
 <header>
+	<span class="stat"><b id="m-unique">&mdash;</b> packages</span>
 	<span class="stat"><b id="m-packages">&mdash;</b> artifacts</span>
 	<span class="stat"><b id="m-bytes">&mdash;</b></span>
 	<span class="spacer"></span>
@@ -63,6 +64,7 @@
 							<th>Artifact</th>
 							<th>Version</th>
 							<th class="num">Size</th>
+							<th>Published</th>
 							<th>sha256</th>
 						</tr>
 					</thead>
@@ -114,6 +116,16 @@
 
 <!-- Status bar: what the server is DOING, second by second. -->
 <footer>
+	<span id="s-build">&mdash;</span>
+	<span class="sep"></span>
+	<span id="s-uptime">&mdash;</span>
+	<span class="spacer"></span>
+	<span id="s-hits">&mdash;</span>
+	<span class="sep"></span>
+	<span id="s-requests">&mdash;</span>
+	<span class="sep"></span>
+	<span id="s-served">&mdash;</span>
+	<span class="sep"></span>
 	<span class="led-group" title="Server reachability">
 		<span class="led" id="led-up"></span><span id="reach">connecting</span>
 	</span>
@@ -122,16 +134,6 @@
 		<span class="led" id="led-tx" style="--led-color: var(--accent)"></span>TX
 		<span class="led" id="led-rx" style="--led-color: var(--ok)"></span>RX
 	</span>
-	<span class="sep"></span>
-	<span id="s-hits">&mdash;</span>
-	<span class="sep"></span>
-	<span id="s-requests">&mdash;</span>
-	<span class="sep"></span>
-	<span id="s-served">&mdash;</span>
-	<span class="spacer"></span>
-	<span id="s-uptime">&mdash;</span>
-	<span class="sep"></span>
-	<span id="s-build" class="muted">&mdash;</span>
 </footer>
 
 <script src="/app.js"></script>

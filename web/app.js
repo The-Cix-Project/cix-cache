@@ -190,6 +190,19 @@ function resultRow(a) {
 	sizeCell.textContent = a.bytes < 0 ? "dangling" : humanBytes(a.bytes);
 	row.appendChild(sizeCell);
 
+	/* When this NAME was published here, not when the bytes were built. */
+	const whenCell = document.createElement("td");
+	whenCell.className = "muted";
+	if (a.modified > 0) {
+		const d = new Date(a.modified * 1000);
+
+		whenCell.textContent = d.toISOString().substring(0, 10);
+		whenCell.title = d.toLocaleString();
+	} else {
+		whenCell.textContent = "-";
+	}
+	row.appendChild(whenCell);
+
 	const digestCell = document.createElement("td");
 	const digest = document.createElement("span");
 	digest.className = "mono digest";
@@ -224,7 +237,7 @@ function renderResults() {
 		const row = document.createElement("tr");
 		const cell = document.createElement("td");
 
-		cell.colSpan = 4;
+		cell.colSpan = 5;
 		cell.className = "empty";
 		cell.textContent = "Nothing matches “" + query + "”.";
 		row.appendChild(cell);
@@ -249,6 +262,8 @@ function renderStatus() {
 	if (!s)
 		return;
 	/* Menu bar: what the registry holds. */
+	/* Four zlibs and three greps: packages and artifacts differ. */
+	setText("m-unique", String(s.unique_packages));
 	setText("m-packages", String(s.packages));
 	setText("m-bytes", humanBytes(s.package_bytes));
 
@@ -267,7 +282,7 @@ function renderStatus() {
 	hits.textContent = s.artifact_hits + " hit / " + s.artifact_misses + " miss";
 	hits.style.color = (s.artifact_misses > 0 && s.artifact_hits === 0) ? "var(--warn)" : "";
 
-	document.title = "cix-cache — " + s.packages + " artifacts";
+	document.title = "cix-cache — " + s.unique_packages + " packages";
 }
 
 function renderReach(up) {

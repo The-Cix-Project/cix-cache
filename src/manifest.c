@@ -5,9 +5,17 @@
 #include <stdio.h>
 #include <string.h>
 
-static int emit_entry(const char *name, const char *digest, off_t size, void *ctx)
+static int emit_entry(const char *name, const char *digest, off_t size, time_t mtime, void *ctx)
 {
 	struct json_writer *w = ctx;
+
+	/*
+	 * Deliberately not in MANIFEST.json: recipe authors read this file
+	 * for a checksum and a size, and a timestamp that changes when a
+	 * name is republished would make otherwise identical manifests
+	 * differ. It is in the API instead, where it is for operators.
+	 */
+	(void)mtime;
 	char file[STORE_NAME_MAX + 16];
 	char key[STORE_NAME_MAX];
 

@@ -152,7 +152,13 @@ static void fmt_status(const struct json_value *v)
 	fprintf(g_out, "lookups:   %lld hit, %lld missed\n", int_field(v, "artifact_hits"),
 	        int_field(v, "artifact_misses"));
 	fprintf(g_out, "served:    %lld bytes\n", int_field(v, "served_bytes"));
-	fprintf(g_out, "artifacts: %lld (%lld bytes)\n", int_field(v, "packages"),
+	/*
+	 * Two different facts: this store holds four zlibs and three
+	 * greps, so the number of packages and the number of published
+	 * files are not the same question.
+	 */
+	fprintf(g_out, "packages:  %lld unique, %lld artifacts (%lld bytes)\n",
+	        int_field(v, "unique_packages"), int_field(v, "packages"),
 	        int_field(v, "package_bytes"));
 	fprintf(g_out, "pull:      %s\n", bool_field(v, "pull_open") ? "open" : "token required");
 	fprintf(g_out, "push:      %s\n", bool_field(v, "push_configured") ? "token required" : "OPEN");
@@ -161,16 +167,23 @@ static void fmt_status(const struct json_value *v)
 static void fmt_artifact_line(const struct json_value *v)
 {
 	const char *version = str_field(v, "version");
+	time_t modified = (time_t)int_field(v, "modified");
+	char when[16] = "-";
 	char size[16];
+	struct tm tm;
 
 	human_bytes(int_field(v, "bytes"), size, sizeof(size));
+	if (modified > 0) {
+		localtime_r(&modified, &tm);
+		strftime(when, sizeof(when), "%Y-%m-%d", &tm);
+	}
 	/*
 	 * Name and version in their own columns, and no URL column: the
 	 * URL is the name, at the root of base_url. Printing both just
 	 * makes the line too wide to read.
 	 */
-	fprintf(g_out, "%-22s %-24.24s %9s  %.12s\n", str_field(v, "artifact"),
-	        version[0] != '\0' ? version : "-", size, str_field(v, "sha256"));
+	fprintf(g_out, "%-22s %-20.20s %9s  %-10s  %.12s\n", str_field(v, "artifact"),
+	        version[0] != '\0' ? version : "-", size, when, str_field(v, "sha256"));
 }
 
 static void fmt_artifacts(const struct json_value *v)
@@ -181,7 +194,8 @@ static void fmt_artifacts(const struct json_value *v)
 
 	if (arr == NULL || arr->type != JSON_ARRAY)
 		return;
-	fprintf(g_out, "%-22s %-24s %9s  %s\n", "ARTIFACT", "VERSION", "SIZE", "SHA256");
+	fprintf(g_out, "%-22s %-20s %9s  %-10s  %s\n", "ARTIFACT", "VERSION", "SIZE", "PUBLISHED",
+	        "SHA256");
 	for (i = 0; i < arr->u.array.count; i++)
 		fmt_artifact_line(arr->u.array.items[i]);
 	human_bytes(int_field(v, "bytes"), total, sizeof(total));

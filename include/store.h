@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <sys/types.h>
+#include <time.h>
 
 /*
  * The artifact store: content-addressed blobs, published under the
@@ -159,8 +160,15 @@ int store_hash_file(const char *path, char *out, size_t out_size);
  * order. fn returns 0 to continue, non-zero to stop the walk (that
  * value is returned). Digest is the symlink target; size is the blob's
  * size, or -1 if the link dangles.
+ *
+ * mtime is the SYMLINK's own timestamp, not the blob's: it answers
+ * "when did this name appear here", which is what an operator wants.
+ * The blob's would answer "when were these bytes first seen under any
+ * name", which for deduplicated content is some other artifact's
+ * history.
  */
-int store_walk(int (*fn)(const char *name, const char *digest, off_t size, void *ctx), void *ctx);
+int store_walk(int (*fn)(const char *name, const char *digest, off_t size, time_t mtime, void *ctx),
+               void *ctx);
 
 /*
  * Removes every blob no published name points at, and returns how many

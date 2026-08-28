@@ -26,6 +26,9 @@ images from these. See `docs/adr/0006-packages-are-the-only-tier.md`.
 
 Everything else is for people: `/` is the dashboard, `/api/v1/*` is
 observability, and `/MANIFEST.json` is generated from the tree on request.
+The store holds several revisions of most packages, so a count of
+packages and a count of published artifacts are different facts and both
+are reported.
 Artifact paths are the only ones ending `.tar.gz`, so the two namespaces
 cannot collide.
 

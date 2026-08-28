@@ -658,9 +658,52 @@ struct list_ctx {
 	struct json_writer *w;
 	long count;
 	long long bytes;
+	/*
+	 * Distinct artifact names, as opposed to published files. This
+	 * store holds four zlibs and three greps; "88 artifacts" and
+	 * "N packages" are different facts and an operator wants both.
+	 */
+	char *names;
+	size_t name_count;
+	size_t name_cap;
 };
 
-static int list_entry(const char *name, const char *digest, off_t size, void *ctx)
+static int name_cmp(const void *a, const void *b)
+{
+	return strcmp((const char *)a, (const char *)b);
+}
+
+static void remember_name(struct list_ctx *lc, const char *short_name)
+{
+	if (lc->name_count == lc->name_cap) {
+		size_t cap = lc->name_cap != 0 ? lc->name_cap * 2 : 64;
+		char *grown = realloc(lc->names, cap * STORE_NAME_MAX);
+
+		if (grown == NULL)
+			return;
+		lc->names = grown;
+		lc->name_cap = cap;
+	}
+	snprintf(lc->names + lc->name_count * STORE_NAME_MAX, STORE_NAME_MAX, "%s", short_name);
+	lc->name_count++;
+}
+
+static long distinct_names(struct list_ctx *lc)
+{
+	long distinct = 0;
+	size_t i;
+
+	if (lc->name_count == 0)
+		return 0;
+	qsort(lc->names, lc->name_count, STORE_NAME_MAX, name_cmp);
+	for (i = 0; i < lc->name_count; i++)
+		if (i == 0 || strcmp(lc->names + i * STORE_NAME_MAX,
+		                     lc->names + (i - 1) * STORE_NAME_MAX) != 0)
+			distinct++;
+	return distinct;
+}
+
+static int list_entry(const char *name, const char *digest, off_t size, time_t mtime, void *ctx)
 {
 	struct list_ctx *lc = ctx;
 
@@ -687,6 +730,8 @@ static int list_entry(const char *name, const char *digest, off_t size, void *ct
 	jw_str(lc->w, digest);
 	jw_key(lc->w, "bytes");
 	jw_int(lc->w, (long long)size);
+	jw_key(lc->w, "modified");
+	jw_int(lc->w, (long long)mtime);
 	jw_obj_close(lc->w);
 	lc->count++;
 	if (size > 0)
@@ -694,12 +739,16 @@ static int list_entry(const char *name, const char *digest, off_t size, void *ct
 	return 0;
 }
 
-static int count_entry(const char *name, const char *digest, off_t size, void *ctx)
+static int count_entry(const char *name, const char *digest, off_t size, time_t mtime, void *ctx)
 {
 	struct list_ctx *lc = ctx;
+	char short_name[STORE_NAME_MAX];
+	char version[STORE_NAME_MAX];
 
-	(void)name;
 	(void)digest;
+	(void)mtime;
+	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version));
+	remember_name(lc, short_name);
 	lc->count++;
 	if (size > 0)
 		lc->bytes += (long long)size;
@@ -804,6 +853,8 @@ static void api_status(struct conn *cc)
 	jw_int(&w, g_served_bytes);
 	jw_key(&w, "packages");
 	jw_int(&w, pkgs.count);
+	jw_key(&w, "unique_packages");
+	jw_int(&w, distinct_names(&pkgs));
 	jw_key(&w, "package_bytes");
 	jw_int(&w, pkgs.bytes);
 	jw_key(&w, "pull_open");
@@ -813,6 +864,7 @@ static void api_status(struct conn *cc)
 	jw_obj_close(&w);
 	respond_json(cc, 200, &w);
 	jw_free(&w);
+	free(pkgs.names);
 }
 
 static void api_artifacts(struct conn *cc)
@@ -835,6 +887,7 @@ static void api_artifacts(struct conn *cc)
 	jw_obj_close(&w);
 	respond_json(cc, 200, &w);
 	jw_free(&w);
+	free(lc.names);
 }
 
 static void api_gc(struct conn *cc, int dry_run)
