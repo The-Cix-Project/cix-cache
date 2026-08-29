@@ -361,6 +361,28 @@ main[hidden] {
 	color: var(--muted);
 }
 
+.arch-chips {
+	display: flex;
+	align-items: center;
+	gap: 0.4rem;
+}
+
+/*
+ * The selected architecture is filled rather than outlined. An active
+ * filter silently removing rows is the kind of thing someone forgets
+ * they switched on, so it has to be the loudest thing in the strip.
+ */
+.chip.on {
+	background: var(--accent);
+	border-color: var(--accent);
+	color: #fff;
+}
+
+.chip.on:hover {
+	color: #fff;
+	opacity: 0.9;
+}
+
 /* Results drop beneath the box, as a floating sheet rather than a
  * section of the page -- the search is the subject, not the table. */
 .results {

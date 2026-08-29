@@ -73,6 +73,12 @@
 
 		<div class="chips">
 			<button class="chip" id="btn-browse">browse everything</button>
+			<!--
+			  Architecture chips, built at render time and present only
+			  while the store holds more than one -- same rule as the
+			  Arch column: a filter with a single option filters nothing.
+			-->
+			<span id="arch-chips" class="arch-chips" hidden></span>
 		</div>
 
 		<!-- Results drop beneath the box as you type. -->
@@ -167,6 +173,13 @@ cixctl --host=&lt;box&gt; pkg sync</code></pre>
 			name is the only thing that can. A request without an architecture resolves
 			while exactly one is published, and returns <span class="tag warn">409</span>
 			once two are, rather than picking one.
+		</p>
+		<p class="note">
+			The <code>Arch</code> column and the architecture chips under the search box
+			both appear only once the store holds more than one &mdash; a column repeating
+			a single value, or a filter with a single option, teaches nothing. They show up
+			by themselves the moment two artifacts disagree, which is exactly when reading
+			a row without them would be a mistake.
 		</p>
 		<p class="note">
 			A name written the old way still works. A push under one is stored

@@ -20,6 +20,8 @@ let query = "";
 let page = 0;
 let logSeq = 0;
 let browsing = false;
+/* "" means every architecture; otherwise the one being shown. */
+let archFilter = "";
 
 const el = (id) => document.getElementById(id);
 const ledTx = el("led-tx");
@@ -147,6 +149,13 @@ function artifactUrl(a) {
 function matches(a) {
 	const needle = query.toLowerCase();
 
+	/*
+	 * Ahead of the text search and never short-circuited past it: the
+	 * chip narrows whatever the query found, rather than competing
+	 * with it.
+	 */
+	if (archFilter !== "" && (a.arch || "") !== archFilter)
+		return false;
 	if (!needle)
 		return true;
 	if (a.artifact.toLowerCase().indexOf(needle) >= 0)
@@ -349,7 +358,17 @@ function setSort(key) {
 function renderResults() {
 	const results = el("results");
 	const body = el("rows");
-	const show = query !== "" || browsing;
+
+	/*
+	 * Ahead of the early return: the chips sit in the strip under the
+	 * search box, which is on screen whether or not there is a list.
+	 * Rendering them only alongside results would mean the one control
+	 * that starts an architecture browse is missing until you have
+	 * already started one.
+	 */
+	renderArchChips();
+
+	const show = query !== "" || browsing || archFilter !== "";
 
 	results.hidden = !show;
 	/* Lets the layout stop vertically centring once there is a list. */
@@ -399,7 +418,15 @@ function renderResults() {
 
 		cell.colSpan = 7;
 		cell.className = "empty";
-		cell.textContent = "Nothing matches “" + query + "”.";
+		/*
+		 * Name the architecture too. Otherwise a filter left on reads
+		 * as "that package is not here", which is a different and
+		 * much more alarming statement.
+		 */
+		cell.textContent = query !== ""
+			? "Nothing matches “" + query + "”" +
+			  (archFilter !== "" ? " on " + archFilter : "") + "."
+			: "Nothing published for " + archFilter + ".";
 		row.appendChild(cell);
 		body.appendChild(row);
 	}
@@ -624,7 +651,15 @@ function openLog() {
 function syncHash() {
 	if (helpOpen())
 		return;
-	const want = query ? "#q=" + encodeURIComponent(query) : "";
+
+	const parts = [];
+
+	if (query !== "")
+		parts.push("q=" + encodeURIComponent(query));
+	if (archFilter !== "")
+		parts.push("arch=" + encodeURIComponent(archFilter));
+
+	const want = parts.length !== 0 ? "#" + parts.join("&") : "";
 
 	if (window.location.hash !== want)
 		history.replaceState(null, "", window.location.pathname + want);
@@ -662,16 +697,93 @@ function readHash() {
 	}
 	setHelp(0, null);
 
-	const m = /^#q=(.*)$/.exec(h);
+	const params = h.substring(1).split("&");
+	let i;
 
-	if (m === null)
-		return;
-	try {
-		query = decodeURIComponent(m[1]);
-	} catch (e) {
-		query = "";
+	query = "";
+	archFilter = "";
+	for (i = 0; i < params.length; i++) {
+		const eq = params[i].indexOf("=");
+		const key = eq < 0 ? params[i] : params[i].substring(0, eq);
+		let value = "";
+
+		if (eq < 0)
+			continue;
+		try {
+			value = decodeURIComponent(params[i].substring(eq + 1));
+		} catch (e) {
+			continue; /* a hand-mangled hash is not worth failing over */
+		}
+		if (key === "q")
+			query = value;
+		else if (key === "arch")
+			archFilter = value;
 	}
 	el("q").value = query;
+}
+
+/*
+ * The chips are built from every artifact, not from the rows currently
+ * shown -- a filter that removed its own way back would be a trap.
+ * They appear only when the store holds more than one architecture,
+ * for the same reason the Arch column does: with one value there is
+ * nothing to choose between, and the control would only ever be able
+ * to hide things.
+ */
+function renderArchChips() {
+	const host = el("arch-chips");
+	const seen = {};
+	const list = [];
+	let i;
+
+	for (i = 0; i < cache.artifacts.length; i++) {
+		const v = cache.artifacts[i].arch || "";
+
+		if (v !== "" && seen[v] === undefined) {
+			seen[v] = 1;
+			list.push(v);
+		}
+	}
+	list.sort();
+
+	if (list.length < 2) {
+		host.hidden = true;
+		host.textContent = "";
+		/* Never leave a filter on that the user can no longer see. */
+		if (archFilter !== "" && seen[archFilter] === undefined) {
+			archFilter = "";
+			syncHash();
+		}
+		return;
+	}
+
+	host.hidden = false;
+	host.textContent = "";
+	list.unshift("");
+	for (i = 0; i < list.length; i++) {
+		const value = list[i];
+		const b = document.createElement("button");
+
+		b.className = "chip" + (archFilter === value ? " on" : "");
+		b.textContent = value === "" ? "all" : value;
+		b.title = value === ""
+			? "Every architecture"
+			: "Only artifacts built for " + value;
+		b.addEventListener("click", () => {
+			archFilter = value;
+			page = 0;
+			/*
+			 * Clicking a chip is a browse, "all" included -- otherwise
+			 * the way back from a filtered list is the empty home
+			 * screen, and the control that got you there cannot undo
+			 * itself.
+			 */
+			browsing = true;
+			syncHash();
+			renderResults();
+		});
+		host.appendChild(b);
+	}
 }
 
 {
