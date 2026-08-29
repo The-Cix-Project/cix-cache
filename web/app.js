@@ -296,18 +296,18 @@ function sortCmp(a, b) {
 		r = a[k] - b[k];
 	} else if (k === "version") {
 		/*
-		 * Numeric collation, so 2.1.10 sorts after 2.1.8 instead of
-		 * before it as a plain string compare would.
+		 * The server's ordering, not ours. version_rank is each
+		 * artifact's position under store_version_cmp(), which knows
+		 * that a prerelease precedes its release (v2.2.0-rc6 before
+		 * v2.2.0) and that 2.1.10 follows 2.1.8 -- neither of which
+		 * string collation gets right.
 		 *
-		 * This is a display order and not a version ordering. A
-		 * prerelease sorts AFTER its final release here -- v2.2.0-rc6
-		 * lands after v2.2.0, being a longer string with the same
-		 * prefix -- where it semantically precedes it. Getting that
-		 * right needs real version comparison with prerelease rules.
-		 * Nothing resolves an artifact by comparing versions, so this
-		 * stays a wart in one column rather than a correctness bug.
+		 * Comparing a number here rather than reimplementing those
+		 * rules is the point: two comparators would eventually
+		 * disagree about which artifact is newer, and only one of
+		 * them would be the one the server acts on.
 		 */
-		r = a.version.localeCompare(b.version, undefined, { numeric: true });
+		r = a.version_rank - b.version_rank;
 	} else if (k === "arch") {
 		r = (a.arch || "").localeCompare(b.arch || "");
 	} else {

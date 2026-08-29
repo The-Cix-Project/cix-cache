@@ -690,6 +690,8 @@ static void begin_upload(struct conn *cc, const struct http_request *req, const 
 
 struct list_ctx {
 	struct json_writer *w;
+	/* Set per entry before list_entry(), which has a fixed signature. */
+	int version_rank;
 	long count;
 	long long bytes;
 	/*
@@ -777,6 +779,15 @@ static int list_entry(const char *name, const char *digest, off_t size, time_t m
 	 */
 	jw_key(lc->w, "arch");
 	jw_str(lc->w, arch);
+	/*
+	 * Position in version order, computed here so there is exactly one
+	 * implementation of the ordering rules (store_version_cmp). A
+	 * browser sorting on this number cannot disagree with the server
+	 * about what "newer" means, which a second comparator in
+	 * JavaScript eventually would.
+	 */
+	jw_key(lc->w, "version_rank");
+	jw_int(lc->w, lc->version_rank);
 	jw_key(lc->w, "sha256");
 	jw_str(lc->w, digest);
 	jw_key(lc->w, "bytes");
@@ -946,9 +957,17 @@ static void api_artifacts(struct conn *cc)
 		int i;
 
 		if (n > 0) {
+			/*
+			 * Ranked before the output order is chosen, over the
+			 * whole set, so the rank means the same thing however
+			 * the client then filters or re-sorts.
+			 */
+			store_rank_versions(ents, n);
 			qsort(ents, (size_t)n, sizeof(*ents), store_cmp_newest);
-			for (i = 0; i < n; i++)
+			for (i = 0; i < n; i++) {
+				lc.version_rank = ents[i].version_rank;
 				list_entry(ents[i].name, ents[i].digest, ents[i].size, ents[i].mtime, &lc);
+			}
 		}
 		free(ents);
 	}

@@ -511,6 +511,53 @@ static void test_arch(const char *root)
 	CHECK(store_unpublish("archpkg-1.0-1-aarch64.tar.gz") == STORE_OK, "clean up aarch64");
 }
 
+/*
+ * Version ordering (#5). The cases are the ones this store actually
+ * holds, plus the two that plain string collation gets backwards.
+ */
+static void test_version_cmp(void)
+{
+	static const struct {
+		const char *lo;
+		const char *hi;
+		const char *why;
+	} pairs[] = {
+		/* The bug this was filed for: a candidate precedes its release. */
+		{ "v2.2.0-rc6", "v2.2.0", "a prerelease is older than its release" },
+		{ "v2.2.0-rc6", "v2.2.0-rc10", "rc6 is older than rc10, not newer" },
+		/* Numeric, where collation alone gets it wrong. */
+		{ "2.1.8", "2.1.10", "2.1.10 follows 2.1.8" },
+		{ "1.2", "1.2.1", "a shorter version is older" },
+		{ "1.9", "1.10", "ten follows nine" },
+		/*
+		 * Patch levels are NOT prereleases: no hyphen, so they are
+		 * newer than the version they patch. Both are in this store.
+		 */
+		{ "10.4", "10.4p1", "openssh's p1 is a patch level, so newer" },
+		{ "1.5.8", "1.5.8.pl02", "xorriso's pl02 likewise" },
+		/* Text vs number in the same position. */
+		{ "1.beta", "1.2", "a number outranks text" },
+		{ "s20180629", "s20180630", "iputils' date-ish versions still order" }
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(pairs) / sizeof(pairs[0]); i++) {
+		char msg[220];
+
+		snprintf(msg, sizeof(msg), "%s < %s -- %s", pairs[i].lo, pairs[i].hi, pairs[i].why);
+		CHECK(store_version_cmp(pairs[i].lo, pairs[i].hi) < 0, msg);
+		snprintf(msg, sizeof(msg), "%s > %s (the other way round)", pairs[i].hi, pairs[i].lo);
+		CHECK(store_version_cmp(pairs[i].hi, pairs[i].lo) > 0, msg);
+	}
+
+	/* Equality, including the spellings that mean the same thing. */
+	CHECK(store_version_cmp("2.1.1", "2.1.1") == 0, "a version equals itself");
+	CHECK(store_version_cmp("v2.1.1", "2.1.1") == 0, "a leading v is not part of the version");
+	CHECK(store_version_cmp("1.007", "1.7") == 0, "leading zeros are not magnitude");
+	CHECK(store_version_cmp("", "") == 0, "two absent versions are equal");
+	CHECK(store_version_cmp("", "1.0") < 0, "an absent version is older than any version");
+}
+
 int main(void)
 {
 	char root[] = "/tmp/cixcache-test-store-XXXXXX";
@@ -526,6 +573,7 @@ int main(void)
 	test_names();
 	test_split_display();
 	test_canonical_name();
+	test_version_cmp();
 	test_publish(root);
 	test_gc(root);
 	/*

@@ -955,6 +955,170 @@ int store_list(struct store_entry **out)
 	return (int)set.count;
 }
 
+static int vdigit(char c)
+{
+	return c >= '0' && c <= '9';
+}
+
+/*
+ * A separator is its own run. Without this it gets swallowed by the
+ * text run after it -- ".beta" compares as one token against "." --
+ * and the rule that a number outranks text in the same position never
+ * gets to fire.
+ */
+static int vsep(char c)
+{
+	return c == '.' || c == '_' || c == '+' || c == '~' || c == '-';
+}
+
+/* One side of the prerelease split, compared run by run. */
+static int part_cmp(const char *a, const char *b)
+{
+	while (*a != '\0' || *b != '\0') {
+		int da;
+		int db;
+
+		/* Whichever ran out first is the older version. */
+		if (*a == '\0')
+			return -1;
+		if (*b == '\0')
+			return 1;
+		da = vdigit(*a);
+		db = vdigit(*b);
+		if (da && db) {
+			const char *sa = a;
+			const char *sb = b;
+			int r;
+
+			while (vdigit(*a))
+				a++;
+			while (vdigit(*b))
+				b++;
+			/* Leading zeros are not magnitude: 007 is 7. */
+			while (sa + 1 < a && *sa == '0')
+				sa++;
+			while (sb + 1 < b && *sb == '0')
+				sb++;
+			if ((a - sa) != (b - sb))
+				return (a - sa) < (b - sb) ? -1 : 1;
+			r = strncmp(sa, sb, (size_t)(a - sa));
+			if (r != 0)
+				return r < 0 ? -1 : 1;
+		} else if (da != db) {
+			/* A number outranks text in the same position. */
+			return da ? 1 : -1;
+		} else {
+			const char *sa = a;
+			const char *sb = b;
+			size_t la;
+			size_t lb;
+			int r;
+
+			if (vsep(*a)) {
+				a++;
+			} else {
+				while (*a != '\0' && !vdigit(*a) && !vsep(*a))
+					a++;
+			}
+			if (vsep(*b)) {
+				b++;
+			} else {
+				while (*b != '\0' && !vdigit(*b) && !vsep(*b))
+					b++;
+			}
+			la = (size_t)(a - sa);
+			lb = (size_t)(b - sb);
+			r = strncmp(sa, sb, la < lb ? la : lb);
+			if (r != 0)
+				return r < 0 ? -1 : 1;
+			if (la != lb)
+				return la < lb ? -1 : 1;
+		}
+	}
+	return 0;
+}
+
+int store_version_cmp(const char *a, const char *b)
+{
+	char amain[STORE_NAME_MAX];
+	char bmain[STORE_NAME_MAX];
+	const char *apre;
+	const char *bpre;
+	const char *dash;
+	int r;
+
+	if (a[0] == 'v' && vdigit(a[1]))
+		a++;
+	if (b[0] == 'v' && vdigit(b[1]))
+		b++;
+
+	dash = strchr(a, '-');
+	apre = dash != NULL ? dash + 1 : NULL;
+	snprintf(amain, sizeof(amain), "%.*s", dash != NULL ? (int)(dash - a) : (int)strlen(a), a);
+	dash = strchr(b, '-');
+	bpre = dash != NULL ? dash + 1 : NULL;
+	snprintf(bmain, sizeof(bmain), "%.*s", dash != NULL ? (int)(dash - b) : (int)strlen(b), b);
+
+	r = part_cmp(amain, bmain);
+	if (r != 0)
+		return r;
+	/* Same version: the one carrying a prerelease came first. */
+	if (apre == NULL && bpre == NULL)
+		return 0;
+	if (apre == NULL)
+		return 1;
+	if (bpre == NULL)
+		return -1;
+	return part_cmp(apre, bpre);
+}
+
+static int cmp_by_version(const void *a, const void *b)
+{
+	const struct store_entry *x = *(struct store_entry *const *)a;
+	const struct store_entry *y = *(struct store_entry *const *)b;
+	char xn[STORE_NAME_MAX];
+	char yn[STORE_NAME_MAX];
+	char xv[STORE_NAME_MAX];
+	char yv[STORE_NAME_MAX];
+	int r;
+
+	store_split_display(x->name, xn, sizeof(xn), xv, sizeof(xv), NULL, NULL, 0);
+	store_split_display(y->name, yn, sizeof(yn), yv, sizeof(yv), NULL, NULL, 0);
+	r = store_version_cmp(xv, yv);
+	if (r != 0)
+		return r;
+	/* Total, so the rank does not depend on the input order. */
+	return strcmp(x->name, y->name);
+}
+
+void store_rank_versions(struct store_entry *v, int n)
+{
+	struct store_entry **idx;
+	int i;
+
+	if (n <= 0)
+		return;
+	/*
+	 * Sorts pointers, not copies, so the rank can be written straight
+	 * back through them. Sorting copies would need the originals found
+	 * again by name afterwards, which is a quadratic scan on a listing
+	 * that is only going to get longer.
+	 */
+	idx = malloc((size_t)n * sizeof(*idx));
+	if (idx == NULL) {
+		/* Ranking is a nicety; leaving them equal is not a failure. */
+		for (i = 0; i < n; i++)
+			v[i].version_rank = 0;
+		return;
+	}
+	for (i = 0; i < n; i++)
+		idx[i] = &v[i];
+	qsort(idx, (size_t)n, sizeof(*idx), cmp_by_version);
+	for (i = 0; i < n; i++)
+		idx[i]->version_rank = i;
+	free(idx);
+}
+
 int store_cmp_newest(const void *a, const void *b)
 {
 	const struct store_entry *x = a;

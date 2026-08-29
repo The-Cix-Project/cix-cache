@@ -285,6 +285,8 @@ struct store_entry {
 	char digest[STORE_SHA256_MAX];
 	off_t size;
 	time_t mtime;
+	/* Position in version order; see store_rank_versions(). */
+	int version_rank;
 };
 
 /*
@@ -313,6 +315,49 @@ int store_list(struct store_entry **out);
  */
 int store_cmp_newest(const void *a, const void *b);
 int store_cmp_name(const void *a, const void *b);
+
+/*
+ * Orders two upstream version strings. Returns -1, 0 or 1.
+ *
+ * Upstream versions are taken verbatim and are not semver, so this is
+ * defined by rules that fit what is actually published rather than by
+ * a standard nothing here follows:
+ *
+ *   1. A leading 'v' before a digit is ignored, so v2.1.1 and 2.1.1
+ *      are the same version.
+ *   2. The string splits at the first '-' into a version and a
+ *      prerelease, as semver does. A version WITH a prerelease is
+ *      older than the same version without one -- v2.2.0-rc6 comes
+ *      before v2.2.0, which plain collation gets backwards because it
+ *      is the longer string.
+ *   3. Each side is then compared run by run, a run being consecutive
+ *      digits or consecutive non-digits. Digit runs compare as
+ *      numbers, so 2.1.10 follows 2.1.8. Text runs compare bytewise.
+ *   4. Where one side has a digit run and the other has text, the
+ *      digits are newer.
+ *   5. Running out first is older. That is what makes 1.2 older than
+ *      1.2.1 -- and, deliberately, what makes 10.4 older than 10.4p1
+ *      and 1.5.8 older than 1.5.8.pl02, because those suffixes are
+ *      patch levels rather than prereleases. Only a hyphen introduces
+ *      a prerelease.
+ *
+ * These rules order every version in this store correctly. They cannot
+ * order every string anyone might publish -- no rule can, when the
+ * input is "whatever upstream called it" -- so the intent is to be
+ * predictable and written down rather than clever.
+ */
+int store_version_cmp(const char *a, const char *b);
+
+/*
+ * Fills in version_rank for each entry: its index once the array is
+ * ordered by store_version_cmp(), ties broken by name.
+ *
+ * A rank rather than the comparison itself, because the consumer is a
+ * browser. Shipping a number the client sorts on keeps ONE
+ * implementation of these rules -- a second one in JavaScript would be
+ * a second thing to keep correct, and the two would drift.
+ */
+void store_rank_versions(struct store_entry *v, int n);
 
 /*
  * Removes every blob no published name points at, and returns how many
