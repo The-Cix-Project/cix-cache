@@ -223,15 +223,19 @@ main[hidden] {
 }
 
 /*
- * The artwork is traced into two paths so each can be coloured on its
- * own: the mark takes the page's text colour and so inverts with the
- * theme, while the word keeps the brand cyan, which carries on both
- * grounds. Regenerate with tools/trace-logo.py.
+ * The wordmark is the name set in the script the artwork is drawn in,
+ * traced to paths rather than loaded as a webfont: a webfont would mean
+ * either a CDN this dashboard must not depend on at view time or a
+ * 330KB file to draw nine glyphs, and a flash of fallback type either
+ * way. Two paths so each half colours on its own -- "cix" takes the
+ * page's text colour and inverts with the theme, "-cache" keeps the
+ * brand cyan, which carries on both grounds. Regenerate both with
+ * tools/trace-logo.py.
  */
 .logo {
 	display: block;
 	margin: 0 auto;
-	width: min(420px, 64%);
+	width: min(430px, 66%);
 	height: auto;
 }
 
@@ -246,12 +250,40 @@ main[hidden] {
 /* Smaller viewports: the wordmark gives up width before the box does. */
 @media (max-height: 620px) {
 	.logo {
-		width: min(320px, 56%);
+		width: min(330px, 58%);
 	}
 
 	.wordmark {
 		margin-bottom: 1.1rem;
 	}
+}
+
+/*
+ * The mark in the menu bar. Sized off the bar rather than the font so
+ * it stays put if the type scale moves, and it is the only thing in
+ * the bar that is not a number -- which is the point of it being here.
+ */
+.brand {
+	display: flex;
+	align-items: center;
+	flex: none;
+	margin-right: 0.15rem;
+	color: var(--text);
+	text-decoration: none;
+}
+
+.brand .mark {
+	height: 1.15rem;
+	width: auto;
+	display: block;
+}
+
+.mark-mark {
+	fill: currentColor;
+}
+
+.brand:hover {
+	color: var(--logo-accent);
 }
 
 .search-box {

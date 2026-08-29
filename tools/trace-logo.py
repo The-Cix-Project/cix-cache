@@ -1,29 +1,47 @@
 #!/usr/bin/env python3
 #
-# Trace design/cix-cache-logo.png into the two-path SVG the dashboard
-# inlines. Two paths and not one because the mark and the word are
-# coloured independently: the mark follows the page's text colour so it
-# inverts with the theme, the word keeps the brand cyan in both.
+# Trace the brand artwork into the inline SVGs the dashboard uses.
 #
-# The source is a clean two-colour raster over transparency, so the
-# separation is exact rather than a guess -- a pixel's blue channel says
-# how much of it is cyan, its alpha says how much of it is ink at all.
+# Everything is emitted as paths rather than as text in a webfont. A
+# webfont would mean either a CDN this dashboard must not depend on at
+# view time, or shipping a 330KB TTF to draw nine glyphs -- and either
+# way a flash of fallback type on every load. Paths have neither
+# problem and colour themselves from CSS.
+#
+# Two paths per image, not one, because each half is coloured
+# independently: the dark half follows the page's text colour so it
+# inverts with the theme, the cyan half keeps the brand colour in both.
+# Both sources are clean two-colour rasters over transparency, so the
+# separation is exact rather than a guess -- a pixel's blue channel
+# says how much of it is cyan, its alpha how much of it is ink at all.
 #
 #   python3 tools/trace-logo.py
 #
-# Writes web/favicon.svg directly, and build/logo-inline.svg to be
-# pasted into the <h1 class="wordmark"> in web/index.html -- the
-# wordmark has to be inline in the document for currentColor to see the
-# page's theme at all, which an <img> would not.
+# Sources, both in design/:
 #
-# Regenerate whenever the artwork changes; nothing else reads the PNG.
+#   cix-cache-logo.png      the artwork: the mark, and "ache" in script
+#   cix-cache-wordmark.png  "cix-cache" set in Pacifico (SIL OFL), with
+#                           "cix" in #000 and "-cache" in #00a8e0, at
+#                           300px on transparency. Pacifico because it
+#                           is the hand the artwork's "ache" is drawn
+#                           in -- compared against it letter by letter
+#                           before choosing.
+#
+# Outputs: web/favicon.svg directly, plus build/*-inline.svg to be
+# pasted into web/index.html. They have to be inline in the document
+# for currentColor to see the page's theme at all, which an <img> would
+# not.
+#
+# Regenerate whenever the artwork changes; nothing else reads the PNGs.
 
 import math
 import sys
 from PIL import Image
 
-SRC = "design/cix-cache-logo.png"
-OUT_INLINE = "build/logo-inline.svg"
+SRC_LOGO = "design/cix-cache-logo.png"
+SRC_WORDMARK = "design/cix-cache-wordmark.png"
+OUT_WORDMARK = "build/wordmark-inline.svg"
+OUT_MARK = "build/mark-inline.svg"
 OUT_FAVICON = "web/favicon.svg"
 
 CYAN = "#00a8e0"
@@ -267,32 +285,37 @@ def bbox(groups):
 	return min(xs), min(ys), max(xs), max(ys)
 
 
-def main():
-	im = Image.open(SRC).convert("RGBA")
-	blk, cyn, w, h = fields(im)
-
-	mark = build(blk, w, h, EPS, 6.0)
-	word = build(cyn, w, h, EPS, 6.0)
-
-	x0, y0, x1, y1 = bbox([mark, word])
+def emit(rings_dark, rings_cyan, label, cls):
+	"""Wraps two traced groups as one inline SVG, normalized to origin."""
+	x0, y0, x1, y1 = bbox([rings_dark, rings_cyan] if rings_cyan else [rings_dark])
 	pad = 2.0
-	vb = (x0 - pad, y0 - pad, (x1 - x0) + 2 * pad, (y1 - y0) + 2 * pad)
 
 	def shift(groups):
-		return [[(x - vb[0], y - vb[1]) for x, y in r] for r in groups]
+		return [[(x - x0 + pad, y - y0 + pad) for x, y in r] for r in groups]
 
-	vbs = "0 0 %.1f %.1f" % (vb[2], vb[3])
-	d_mark = to_path(shift(mark))
-	d_word = to_path(shift(word))
+	body = '<path class="%s-mark" fill-rule="evenodd" d="%s"/>' % (cls, to_path(shift(rings_dark)))
+	if rings_cyan:
+		body += '\n<path class="%s-word" fill-rule="evenodd" d="%s"/>' % (
+			cls, to_path(shift(rings_cyan)))
+	return ('<svg class="%s" viewBox="0 0 %.1f %.1f" role="img" aria-label="%s" '
+	        'xmlns="http://www.w3.org/2000/svg">\n<title>%s</title>\n%s\n</svg>\n' % (
+		        cls, (x1 - x0) + 2 * pad, (y1 - y0) + 2 * pad, label, label, body))
 
-	inline = (
-		'<svg class="logo" viewBox="%s" role="img" aria-label="cix-cache" '
-		'xmlns="http://www.w3.org/2000/svg">\n'
-		'<title>cix-cache</title>\n'
-		'<path class="logo-mark" fill-rule="evenodd" d="%s"/>\n'
-		'<path class="logo-word" fill-rule="evenodd" d="%s"/>\n'
-		'</svg>\n' % (vbs, d_mark, d_word))
-	open(OUT_INLINE, "w").write(inline)
+
+def main():
+	logo = Image.open(SRC_LOGO).convert("RGBA")
+	blk, cyn, w, h = fields(logo)
+	mark = build(blk, w, h, EPS, 6.0)
+
+	"""The mark alone, for the menu bar. The word is not in it: at menu
+	bar height the script would be an unreadable smudge, and the mark is
+	the part that identifies the page from a glance at a tab strip."""
+	open(OUT_MARK, "w").write(emit(mark, None, "cix", "mark"))
+
+	word = Image.open(SRC_WORDMARK).convert("RGBA")
+	wblk, wcyn, ww, wh = fields(word)
+	open(OUT_WORDMARK, "w").write(
+		emit(build(wblk, ww, wh, EPS, 6.0), build(wcyn, ww, wh, EPS, 6.0), "cix-cache", "logo"))
 
 	# Favicon: the mark, cropped square to its left loop rather than
 	# scaled to fit. The whole mark is close to 2:1, so fitting it in a
@@ -313,15 +336,11 @@ def main():
 		'@media (prefers-color-scheme: dark) { path { fill: #f2f2f2 } }\n'
 		'</style>\n'
 		'<path fill-rule="evenodd" d="%s"/>\n'
-		'</svg>\n' % (fx0 - pad, fy0 - pad, side, side,
-		               to_path(fav_rings, prec=1)))
+		'</svg>\n' % (fx0 - pad, fy0 - pad, side, side, to_path(fav_rings, prec=1)))
 	open(OUT_FAVICON, "w").write(favicon)
 
-	sys.stderr.write(
-		"mark %d rings, word %d rings, viewBox %s\n"
-		"  %s  %d bytes\n  %s  %d bytes\n" % (
-			len(mark), len(word), vbs,
-			OUT_INLINE, len(inline), OUT_FAVICON, len(favicon)))
+	for path in (OUT_WORDMARK, OUT_MARK, OUT_FAVICON):
+		sys.stderr.write("  %-28s %6d bytes\n" % (path, len(open(path).read())))
 
 
 main()
