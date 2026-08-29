@@ -272,14 +272,30 @@ main[hidden] {
 	text-decoration: none;
 }
 
+/*
+ * A square tile reads smaller than a wide glyph at the same height, so
+ * it gets a little more than the bare mark did.
+ */
 .brand .mark {
-	height: 1.15rem;
+	height: 1.45rem;
 	width: auto;
 	display: block;
 }
 
-.mark-mark {
-	fill: currentColor;
+/*
+ * The tile inverts with the page rather than being fixed dark: the
+ * tile takes the text colour and the glyph the background, so it holds
+ * the same contrast either way round instead of sitting as a dark
+ * block on a light page. web/favicon.svg carries the same pairing as a
+ * media query, because a favicon is drawn by the browser chrome and
+ * cannot see these properties.
+ */
+.tile-bg {
+	fill: var(--text);
+}
+
+.tile-fg {
+	fill: var(--bg);
 }
 
 .brand:hover {

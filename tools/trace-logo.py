@@ -35,11 +35,26 @@
 # Regenerate whenever the artwork changes; nothing else reads the PNGs.
 
 import math
+import re
 import sys
 from PIL import Image
 
-SRC_LOGO = "design/cix-cache-logo.png"
 SRC_WORDMARK = "design/cix-cache-wordmark.png"
+
+# The mark is authored vector art, not traced. In cix-cache-logo.png its
+# lower right stroke runs into the cyan of "ache", so separating that
+# image by colour cuts the stroke where the two meet and the glyph comes
+# out clipped -- which is what shipped before this. Nothing here traces
+# the mark any more; it is copied from the drawn source.
+SRC_TILE = "design/cix-tile.svg"
+
+# The favicon cannot see the page's theme -- it is drawn by the browser
+# chrome, not the document -- so it carries its own media query instead
+# of custom properties. These are the same tokens the stylesheet uses,
+# inverted the same way: the tile takes the text colour and the glyph
+# the background.
+FAVICON_LIGHT = ("#1c1c1e", "#f5f5f7")
+FAVICON_DARK = ("#f2f2f2", "#121214")
 OUT_WORDMARK = "build/wordmark-inline.svg"
 OUT_MARK = "build/mark-inline.svg"
 OUT_FAVICON = "web/favicon.svg"
@@ -302,42 +317,42 @@ def emit(rings_dark, rings_cyan, label, cls):
 		        cls, (x1 - x0) + 2 * pad, (y1 - y0) + 2 * pad, label, label, body))
 
 
+def read_tile():
+	"""The tile's innards, straight from the drawn source."""
+	svg = open(SRC_TILE).read()
+	m = re.search(r"<svg[^>]*>(.*)</svg>", svg, re.S)
+	if m is None:
+		sys.stderr.write("%s: no svg element found\n" % SRC_TILE)
+		sys.exit(1)
+	return m.group(1).strip()
+
+
 def main():
-	logo = Image.open(SRC_LOGO).convert("RGBA")
-	blk, cyn, w, h = fields(logo)
-	mark = build(blk, w, h, EPS, 6.0)
-
-	"""The mark alone, for the menu bar. The word is not in it: at menu
-	bar height the script would be an unreadable smudge, and the mark is
-	the part that identifies the page from a glance at a tab strip."""
-	open(OUT_MARK, "w").write(emit(mark, None, "cix", "mark"))
-
 	word = Image.open(SRC_WORDMARK).convert("RGBA")
 	wblk, wcyn, ww, wh = fields(word)
 	open(OUT_WORDMARK, "w").write(
 		emit(build(wblk, ww, wh, EPS, 6.0), build(wcyn, ww, wh, EPS, 6.0), "cix-cache", "logo"))
 
-	# Favicon: the mark, cropped square to its left loop rather than
-	# scaled to fit. The whole mark is close to 2:1, so fitting it in a
-	# square box leaves it 16 wide and 8 tall -- an illegible smear at
-	# the size that actually matters. Cropping keeps the loop and its
-	# dot at full weight, which is the part of the mark distinctive
-	# enough to find in a tab strip. The crop is the viewBox alone, so
-	# no path is cut; the root SVG clips what falls outside.
-	fav_rings = build(blk, w, h, EPS_FAVICON, 20.0)
-	fx0, fy0, fx1, fy1 = bbox([fav_rings])
-	pad = 6.0
-	side = (fy1 - fy0) + 2 * pad
-	favicon = (
-		'<svg viewBox="%.1f %.1f %.1f %.1f" '
-		'xmlns="http://www.w3.org/2000/svg">\n'
+	inner = read_tile()
+
+	# The mark alone, for the menu bar. The word is not in it: at menu
+	# bar height the script would be an unreadable smudge, and the mark
+	# is the part that identifies the page from a glance at a tab strip.
+	# Inline in the document so its two classes resolve against the
+	# page's own custom properties.
+	open(OUT_MARK, "w").write(
+		'<svg class="mark" viewBox="0 0 256 256" role="img" aria-label="cix" '
+		'xmlns="http://www.w3.org/2000/svg">\n%s\n</svg>\n' % inner)
+
+	open(OUT_FAVICON, "w").write(
+		'<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">\n'
 		'<style>\n'
-		'path { fill: #1c1c1e }\n'
-		'@media (prefers-color-scheme: dark) { path { fill: #f2f2f2 } }\n'
-		'</style>\n'
-		'<path fill-rule="evenodd" d="%s"/>\n'
-		'</svg>\n' % (fx0 - pad, fy0 - pad, side, side, to_path(fav_rings, prec=1)))
-	open(OUT_FAVICON, "w").write(favicon)
+		'.tile-bg { fill: %s } .tile-fg { fill: %s }\n'
+		'@media (prefers-color-scheme: dark) {\n'
+		'.tile-bg { fill: %s } .tile-fg { fill: %s }\n'
+		'}\n'
+		'</style>\n%s\n</svg>\n'
+		% (FAVICON_LIGHT[0], FAVICON_LIGHT[1], FAVICON_DARK[0], FAVICON_DARK[1], inner))
 
 	for path in (OUT_WORDMARK, OUT_MARK, OUT_FAVICON):
 		sys.stderr.write("  %-28s %6d bytes\n" % (path, len(open(path).read())))
