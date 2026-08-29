@@ -32,6 +32,8 @@ const char *store_error_str(enum store_error e)
 		return "invalid artifact name";
 	case STORE_ERR_NOT_FOUND:
 		return "not found";
+	case STORE_ERR_AMBIGUOUS:
+		return "that name exists for more than one architecture -- ask for one";
 	case STORE_ERR_CONFLICT:
 		return "already published with a different digest";
 	case STORE_ERR_IO:
@@ -117,6 +119,59 @@ int store_name_is_valid(const char *name)
 }
 
 /*
+ * uname -m spellings. One list, so the cache, the daemon and the build
+ * system cannot drift into three spellings of the same machine.
+ */
+static const char *const g_arches[] = { "x86_64", "aarch64", "armv7l", "riscv64", NULL };
+
+const char *const *store_arches(void)
+{
+	return g_arches;
+}
+
+/*
+ * Offset of the architecture inside a stem, or 0 when it carries none.
+ * A whitelist rather than a pattern: the last component of a name is
+ * otherwise ordinary text, so only a listed word counts.
+ */
+static size_t arch_offset(const char *name, size_t stem)
+{
+	size_t i;
+
+	for (i = 0; g_arches[i] != NULL; i++) {
+		size_t len = strlen(g_arches[i]);
+
+		if (stem > len + 1 && name[stem - len - 1] == '-' &&
+		    strncmp(name + stem - len, g_arches[i], len) == 0)
+			return stem - len;
+	}
+	return 0;
+}
+
+const char *store_arch_of(const char *name, char *out, size_t out_size)
+{
+	size_t len = strlen(name);
+	size_t stem = len > 7 ? len - 7 : len;
+	size_t at = arch_offset(name, stem);
+
+	if (at == 0)
+		return NULL;
+	if (out != NULL)
+		snprintf(out, out_size, "%.*s", (int)(stem - at), name + at);
+	/* The entry in the table, so the caller gets a stable pointer. */
+	{
+		size_t i;
+
+		for (i = 0; g_arches[i] != NULL; i++) {
+			if (strncmp(name + at, g_arches[i], stem - at) == 0 &&
+			    strlen(g_arches[i]) == stem - at)
+				return g_arches[i];
+		}
+	}
+	return NULL;
+}
+
+/*
  * Offset of the first digit of the release inside a stem, or 0 when
  * the stem carries none. See store_canonical_name() for the rule and
  * why it is the tail alone that is parsed.
@@ -177,15 +232,33 @@ static int has_version(const char *name, size_t stem)
 
 int store_canonical_name(const char *name, char *out, size_t out_size)
 {
+	char suffix[64];
 	size_t len;
 	size_t stem;
 	size_t rel;
 	size_t z;
+	size_t arch;
 
 	if (!store_name_is_valid(name))
 		return -1;
 	len = strlen(name);
 	stem = len - 7; /* store_name_is_valid() guarantees the .tar.gz */
+
+	/*
+	 * An architecture already in the name is carried through untouched,
+	 * and one that is absent is NEVER added. Appending -x86_64 here
+	 * would turn a push that claimed nothing about its machine into one
+	 * that claims x86_64, and an aarch64 build pushed under a bare name
+	 * would be stored under a false label. store_set_arch() exists for
+	 * the case where an operator can actually vouch for the answer.
+	 */
+	arch = arch_offset(name, stem);
+	if (arch != 0) {
+		snprintf(suffix, sizeof(suffix), "-%.*s.tar.gz", (int)(stem - arch), name + arch);
+		stem = arch - 1;
+	} else {
+		snprintf(suffix, sizeof(suffix), ".tar.gz");
+	}
 	rel = release_offset(name, stem);
 
 	if (rel == 0) {
@@ -199,34 +272,46 @@ int store_canonical_name(const char *name, char *out, size_t out_size)
 		 * a name exactly as it is rather than inventing a version.
 		 */
 		if (!has_version(name, stem)) {
-			if ((size_t)snprintf(out, out_size, "%s", name) >= out_size)
+			if ((size_t)snprintf(out, out_size, "%.*s%s", (int)stem, name, suffix) >= out_size)
 				return -1;
-			return 0;
+			return strcmp(out, name) != 0 ? 1 : 0;
 		}
-		if ((size_t)snprintf(out, out_size, "%.*s-1.tar.gz", (int)stem, name) >= out_size)
+		if ((size_t)snprintf(out, out_size, "%.*s-1%s", (int)stem, name, suffix) >= out_size)
 			return -1;
 	} else {
 		/* Skip leading zeros textually; strtol here could overflow. */
 		z = rel;
 		while (z + 1 < stem && name[z] == '0')
 			z++;
-		if ((size_t)snprintf(out, out_size, "%.*s-%.*s.tar.gz", (int)(rel - 1), name,
-		                     (int)(stem - z), name + z) >= out_size)
+		if ((size_t)snprintf(out, out_size, "%.*s-%.*s%s", (int)(rel - 1), name,
+		                     (int)(stem - z), name + z, suffix) >= out_size)
 			return -1;
 	}
 	return strcmp(out, name) != 0 ? 1 : 0;
 }
 
 void store_split_display(const char *name, char *out_name, size_t out_name_size, char *out_version,
-                         size_t out_version_size, int *out_release)
+                         size_t out_version_size, int *out_release, char *out_arch,
+                         size_t out_arch_size)
 {
 	size_t len = strlen(name);
 	size_t stem = len > 7 ? len - 7 : len;
 	size_t rel;
+	size_t arch;
 	size_t i;
 
 	out_name[0] = '\0';
 	out_version[0] = '\0';
+	if (out_arch != NULL)
+		out_arch[0] = '\0';
+
+	/* Off the end first, so the release is not read out of it. */
+	arch = arch_offset(name, stem);
+	if (arch != 0) {
+		if (out_arch != NULL)
+			snprintf(out_arch, out_arch_size, "%.*s", (int)(stem - arch), name + arch);
+		stem = arch - 1;
+	}
 
 	rel = release_offset(name, stem);
 	if (out_release != NULL) {
@@ -316,21 +401,81 @@ static enum store_error resolve_path(const char *path, char *out_digest, size_t 
 	return STORE_OK;
 }
 
-enum store_error store_resolve(const char *name, char *out_digest, size_t out_digest_size)
+enum store_error store_resolve_as(const char *name, char *out_digest, size_t out_digest_size,
+                                  char *out_name, size_t out_name_size)
 {
+	char canonical[STORE_NAME_MAX];
+	char probe[STORE_NAME_MAX];
+	char hit_name[STORE_NAME_MAX];
+	char hit_digest[STORE_SHA256_MAX];
 	char path[PATH_MAX];
+	enum store_error e;
+	size_t stem;
+	int hits = 0;
+	int i;
 
 	if (out_digest_size < STORE_SHA256_MAX)
 		return STORE_ERR_IO;
 	if (!store_name_is_valid(name))
 		return STORE_ERR_INVALID_NAME;
-	if (entry_path(name, path, sizeof(path)) != 0)
+	if (store_canonical_name(name, canonical, sizeof(canonical)) < 0)
 		return STORE_ERR_INVALID_NAME;
-	return resolve_path(path, out_digest, out_digest_size);
+
+	/* The name as asked for, first. */
+	if (raw_entry_path(canonical, path, sizeof(path)) != 0)
+		return STORE_ERR_INVALID_NAME;
+	e = resolve_path(path, out_digest, out_digest_size);
+	if (e == STORE_OK) {
+		if (out_name != NULL)
+			snprintf(out_name, out_name_size, "%s", canonical);
+		return STORE_OK;
+	}
+	if (e != STORE_ERR_NOT_FOUND)
+		return e;
+
+	/* A request that named an architecture has nothing to fall back to. */
+	if (store_arch_of(canonical, NULL, 0) != NULL)
+		return STORE_ERR_NOT_FOUND;
+
+	/*
+	 * A bare name, against a store whose entries carry architectures.
+	 * It resolves only if exactly one architecture has it. While there
+	 * is one architecture that is every recipe written before this
+	 * existed, still working. When there are two the name stops
+	 * resolving -- which is the point: a checksum cannot tell an
+	 * aarch64 binary from an x86_64 one, so picking either would be
+	 * serving the wrong bytes with a signature that verifies.
+	 */
+	stem = strlen(canonical) - 7;
+	for (i = 0; g_arches[i] != NULL; i++) {
+		char found[STORE_SHA256_MAX];
+
+		snprintf(probe, sizeof(probe), "%.*s-%s.tar.gz", (int)stem, canonical, g_arches[i]);
+		if (raw_entry_path(probe, path, sizeof(path)) != 0)
+			continue;
+		if (resolve_path(path, found, sizeof(found)) != STORE_OK)
+			continue;
+		if (hits > 0)
+			return STORE_ERR_AMBIGUOUS;
+		hits++;
+		snprintf(hit_name, sizeof(hit_name), "%s", probe);
+		memcpy(hit_digest, found, sizeof(hit_digest));
+	}
+	if (hits == 0)
+		return STORE_ERR_NOT_FOUND;
+	memcpy(out_digest, hit_digest, STORE_SHA256_MAX);
+	if (out_name != NULL)
+		snprintf(out_name, out_name_size, "%s", hit_name);
+	return STORE_OK;
+}
+
+enum store_error store_resolve(const char *name, char *out_digest, size_t out_digest_size)
+{
+	return store_resolve_as(name, out_digest, out_digest_size, NULL, 0);
 }
 
 enum store_error store_open(const char *name, int *out_fd, off_t *out_size, char *out_digest,
-                            size_t out_digest_size)
+                            size_t out_digest_size, char *out_name, size_t out_name_size)
 {
 	char digest[STORE_SHA256_MAX];
 	char path[PATH_MAX];
@@ -338,7 +483,7 @@ enum store_error store_open(const char *name, int *out_fd, off_t *out_size, char
 	struct stat st;
 	int fd;
 
-	e = store_resolve(name, digest, sizeof(digest));
+	e = store_resolve_as(name, digest, sizeof(digest), out_name, out_name_size);
 	if (e != STORE_OK)
 		return e;
 	if (blob_path(digest, path, sizeof(path)) != 0)
@@ -600,6 +745,100 @@ static int collect_noncanonical(const char *name, const char *digest, off_t size
 	snprintf(set->slots + set->count * STORE_NAME_MAX, STORE_NAME_MAX, "%s", name);
 	set->count++;
 	return 0;
+}
+
+static int collect_archless(const char *name, const char *digest, off_t size, time_t mtime,
+                            void *ctx)
+{
+	struct rename_set *set = ctx;
+
+	(void)digest;
+	(void)size;
+	(void)mtime;
+	if (!store_name_is_valid(name) || store_arch_of(name, NULL, 0) != NULL)
+		return 0;
+	if (set->count == set->cap) {
+		size_t cap = set->cap != 0 ? set->cap * 2 : 64;
+		char *grown = realloc(set->slots, cap * STORE_NAME_MAX);
+
+		if (grown == NULL)
+			return -1;
+		set->slots = grown;
+		set->cap = cap;
+	}
+	snprintf(set->slots + set->count * STORE_NAME_MAX, STORE_NAME_MAX, "%s", name);
+	set->count++;
+	return 0;
+}
+
+int store_set_arch(const char *arch, int dry_run, int *out_renamed, int *out_conflicts)
+{
+	struct rename_set set;
+	char to_name[STORE_NAME_MAX];
+	char from[PATH_MAX];
+	char to[PATH_MAX];
+	struct stat st;
+	size_t i;
+	int renamed = 0;
+	int conflicts = 0;
+	int known = 0;
+	int rc = 0;
+
+	for (i = 0; g_arches[i] != NULL; i++) {
+		if (strcmp(g_arches[i], arch) == 0)
+			known = 1;
+	}
+	if (!known) {
+		fprintf(stderr, "cixcached: '%s' is not an architecture this store knows\n", arch);
+		return -1;
+	}
+
+	set.slots = NULL;
+	set.count = 0;
+	set.cap = 0;
+	if (store_walk(collect_archless, &set) != 0) {
+		free(set.slots);
+		fprintf(stderr, "cixcached: cannot read the store to stamp it\n");
+		return -1;
+	}
+
+	for (i = 0; i < set.count; i++) {
+		const char *name = set.slots + i * STORE_NAME_MAX;
+		size_t stem = strlen(name) - 7;
+
+		if ((size_t)snprintf(to_name, sizeof(to_name), "%.*s-%s.tar.gz", (int)stem, name,
+		                     arch) >= sizeof(to_name) ||
+		    raw_entry_path(name, from, sizeof(from)) != 0 ||
+		    raw_entry_path(to_name, to, sizeof(to)) != 0) {
+			fprintf(stderr, "set-arch: %s: name too long\n", name);
+			rc = -1;
+			continue;
+		}
+		if (lstat(to, &st) == 0) {
+			fprintf(stderr, "set-arch: %s -> %s: target exists, skipped\n", name, to_name);
+			conflicts++;
+			continue;
+		}
+		if (dry_run) {
+			printf("would rename %s -> %s\n", name, to_name);
+			renamed++;
+			continue;
+		}
+		if (rename(from, to) != 0) {
+			fprintf(stderr, "set-arch: %s -> %s: %s\n", name, to_name, strerror(errno));
+			rc = -1;
+			continue;
+		}
+		printf("renamed %s -> %s\n", name, to_name);
+		renamed++;
+	}
+
+	free(set.slots);
+	if (out_renamed != NULL)
+		*out_renamed = renamed;
+	if (out_conflicts != NULL)
+		*out_conflicts = conflicts;
+	return rc;
 }
 
 int store_canonicalize(int dry_run, int *out_renamed, int *out_conflicts)

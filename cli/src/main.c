@@ -173,6 +173,13 @@ static void fmt_status(const struct json_value *v)
 	fprintf(g_out, "push:      %s\n", bool_field(v, "push_configured") ? "token required" : "OPEN");
 }
 
+/*
+ * Whether the architecture column is worth its width. Same rule as the
+ * dashboard: a column repeating one value teaches nothing, so it shows
+ * up only once two artifacts disagree.
+ */
+static int g_show_arch;
+
 static void fmt_artifact_line(const struct json_value *v)
 {
 	const char *version = str_field(v, "version");
@@ -195,6 +202,14 @@ static void fmt_artifact_line(const struct json_value *v)
 	 * because it is Cix's number, not upstream's -- 5.2.37 is what
 	 * the bash authors released, -2 is what we did to it.
 	 */
+	if (g_show_arch) {
+		const char *arch = str_field(v, "arch");
+
+		fprintf(g_out, "%-18s %12.12s %4lld %-8s %9s  %.12s  %10s\n", str_field(v, "artifact"),
+		        version[0] != '\0' ? version : "-", int_field(v, "release"),
+		        arch[0] != '\0' ? arch : "-", size, str_field(v, "sha256"), when);
+		return;
+	}
 	fprintf(g_out, "%-18s %12.12s %4lld  %9s  %.12s  %10s\n", str_field(v, "artifact"),
 	        version[0] != '\0' ? version : "-", int_field(v, "release"), size,
 	        str_field(v, "sha256"), when);
@@ -208,8 +223,20 @@ static void fmt_artifacts(const struct json_value *v)
 
 	if (arr == NULL || arr->type != JSON_ARRAY)
 		return;
-	fprintf(g_out, "%-18s %12s %4s  %9s  %-12s  %10s\n", "ARTIFACT", "VERSION", "REL", "SIZE",
-	        "SHA256", "PUBLISHED");
+	g_show_arch = 0;
+	for (i = 1; i < arr->u.array.count; i++) {
+		if (strcmp(str_field(arr->u.array.items[i], "arch"),
+		           str_field(arr->u.array.items[0], "arch")) != 0) {
+			g_show_arch = 1;
+			break;
+		}
+	}
+	if (g_show_arch)
+		fprintf(g_out, "%-18s %12s %4s %-8s %9s  %-12s  %10s\n", "ARTIFACT", "VERSION", "REL",
+		        "ARCH", "SIZE", "SHA256", "PUBLISHED");
+	else
+		fprintf(g_out, "%-18s %12s %4s  %9s  %-12s  %10s\n", "ARTIFACT", "VERSION", "REL",
+		        "SIZE", "SHA256", "PUBLISHED");
 	for (i = 0; i < arr->u.array.count; i++)
 		fmt_artifact_line(arr->u.array.items[i]);
 	human_bytes(int_field(v, "bytes"), total, sizeof(total));

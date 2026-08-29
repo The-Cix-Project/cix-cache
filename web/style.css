@@ -890,3 +890,16 @@ th.sortable[aria-sort="ascending"]::after {
 th.sortable[aria-sort="descending"]::after {
 	content: " \25BE";
 }
+
+/*
+ * Hidden until two artifacts actually differ by it -- see the comment
+ * in renderResults(). A column repeating one value is worse than no
+ * column: it costs width and teaches nothing.
+ */
+.arch-col {
+	display: none;
+}
+
+.show-arch .arch-col {
+	display: table-cell;
+}

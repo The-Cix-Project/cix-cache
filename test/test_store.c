@@ -87,6 +87,7 @@ static void test_split_display(void)
 	};
 	char name[256];
 	char version[256];
+	char arch[64];
 	size_t i;
 
 	for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
@@ -94,7 +95,7 @@ static void test_split_display(void)
 		int release = -1;
 
 		store_split_display(cases[i].file, name, sizeof(name), version, sizeof(version),
-		                    &release);
+		                    &release, arch, sizeof(arch));
 		snprintf(msg, sizeof(msg), "%s splits to '%s' + '%s' + r%d (got '%s' + '%s' + r%d)",
 		         cases[i].file, cases[i].name, cases[i].version, cases[i].release, name, version,
 		         release);
@@ -249,7 +250,7 @@ static void test_publish(const char *root)
 	              strcmp(got, digest_a) == 0,
 	      "a rejected republish did not disturb the existing name");
 
-	CHECK(store_open("one-1.0.tar.gz", &fd, &size, got, sizeof(got)) ==
+	CHECK(store_open("one-1.0.tar.gz", &fd, &size, got, sizeof(got), NULL, 0) ==
 	              STORE_OK,
 	      "open a published artifact");
 	if (fd >= 0)
@@ -423,6 +424,93 @@ static void test_list_order(const char *root)
 	free(ents);
 }
 
+/*
+ * Architecture in a name (ADR-0008).
+ *
+ * The assertion that matters is the ambiguous one. A checksum cannot
+ * tell an aarch64 binary from an x86_64 one -- the bytes are exactly
+ * the bytes that were published -- so serving the wrong machine's
+ * artifact is the one failure the content-addressed design cannot
+ * catch. When a bare name could mean either, it has to mean neither.
+ */
+static void test_arch(const char *root)
+{
+	char digest_x[STORE_SHA256_MAX];
+	char digest_a[STORE_SHA256_MAX];
+	char got[STORE_SHA256_MAX];
+	char resolved[STORE_NAME_MAX];
+	char out[STORE_NAME_MAX];
+	char tmp[512];
+	int renamed = 0;
+	int conflicts = 0;
+
+	/* Canonical form carries an architecture through, and never adds one. */
+	CHECK(store_canonical_name("tcc-0.9.27-7-x86_64.tar.gz", out, sizeof(out)) == 0 &&
+	              strcmp(out, "tcc-0.9.27-7-x86_64.tar.gz") == 0,
+	      "an arch-qualified canonical name is unchanged");
+	CHECK(store_canonical_name("tcc-0.9.27-x86_64.tar.gz", out, sizeof(out)) == 1 &&
+	              strcmp(out, "tcc-0.9.27-1-x86_64.tar.gz") == 0,
+	      "the release is added behind the architecture, not in front of it");
+	CHECK(store_canonical_name("tcc-0.9.27-7.tar.gz", out, sizeof(out)) == 0 &&
+	              strcmp(out, "tcc-0.9.27-7.tar.gz") == 0,
+	      "a name with no architecture does not acquire one");
+	CHECK(store_arch_of("tcc-0.9.27-7-aarch64.tar.gz", out, sizeof(out)) != NULL &&
+	              strcmp(out, "aarch64") == 0,
+	      "the architecture is read back off a name");
+	CHECK(store_arch_of("tcc-0.9.27-7.tar.gz", NULL, 0) == NULL, "and is absent when absent");
+	/* Only a listed word counts, or ordinary text becomes an architecture. */
+	CHECK(store_arch_of("foo-1.0-1-sparc64.tar.gz", NULL, 0) == NULL,
+	      "an unlisted trailing word is not an architecture");
+
+	snprintf(tmp, sizeof(tmp), "%s/tmp/archx", root);
+	write_file(tmp, "x86_64 bytes");
+	CHECK(store_hash_file(tmp, digest_x, sizeof(digest_x)) == 0, "hash the x86_64 payload");
+	CHECK(store_blob_adopt(tmp, digest_x) == STORE_OK, "adopt it");
+	CHECK(store_publish("archpkg-1.0-1-x86_64.tar.gz", digest_x) == STORE_OK,
+	      "publish for one architecture");
+
+	/* One architecture: a bare name is unambiguous, so old recipes work. */
+	CHECK(store_resolve_as("archpkg-1.0-1.tar.gz", got, sizeof(got), resolved,
+	                       sizeof(resolved)) == STORE_OK &&
+	              strcmp(got, digest_x) == 0,
+	      "a bare name resolves while one architecture exists");
+	CHECK(strcmp(resolved, "archpkg-1.0-1-x86_64.tar.gz") == 0,
+	      "and reports which entry answered, so the alias can be logged");
+	/* The release-less spelling too -- both aliases compose. */
+	CHECK(store_resolve("archpkg-1.0.tar.gz", got, sizeof(got)) == STORE_OK,
+	      "the pre-release-suffix spelling still resolves as well");
+
+	snprintf(tmp, sizeof(tmp), "%s/tmp/archa", root);
+	write_file(tmp, "aarch64 bytes");
+	CHECK(store_hash_file(tmp, digest_a, sizeof(digest_a)) == 0, "hash the aarch64 payload");
+	CHECK(store_blob_adopt(tmp, digest_a) == STORE_OK, "adopt it");
+	CHECK(store_publish("archpkg-1.0-1-aarch64.tar.gz", digest_a) == STORE_OK,
+	      "the second architecture is a separate entry, not a conflict");
+
+	/* Two architectures: the bare name must now refuse, not pick. */
+	CHECK(store_resolve("archpkg-1.0-1.tar.gz", got, sizeof(got)) == STORE_ERR_AMBIGUOUS,
+	      "a bare name stops resolving once two architectures have it");
+	CHECK(store_resolve("archpkg-1.0.tar.gz", got, sizeof(got)) == STORE_ERR_AMBIGUOUS,
+	      "and so does the release-less spelling of it");
+
+	/* Naming one still works, and gets that one's bytes. */
+	CHECK(store_resolve("archpkg-1.0-1-x86_64.tar.gz", got, sizeof(got)) == STORE_OK &&
+	              strcmp(got, digest_x) == 0,
+	      "asking for x86_64 gets the x86_64 bytes");
+	CHECK(store_resolve("archpkg-1.0-1-aarch64.tar.gz", got, sizeof(got)) == STORE_OK &&
+	              strcmp(got, digest_a) == 0,
+	      "asking for aarch64 gets the aarch64 bytes");
+	CHECK(store_resolve("archpkg-1.0-1-riscv64.tar.gz", got, sizeof(got)) == STORE_ERR_NOT_FOUND,
+	      "asking for an architecture nobody published is an ordinary miss");
+
+	/* The stamp refuses a machine it does not know, rather than inventing it. */
+	CHECK(store_set_arch("pdp11", 1, &renamed, &conflicts) == -1,
+	      "an unknown architecture is refused");
+
+	CHECK(store_unpublish("archpkg-1.0-1-x86_64.tar.gz") == STORE_OK, "clean up x86_64");
+	CHECK(store_unpublish("archpkg-1.0-1-aarch64.tar.gz") == STORE_OK, "clean up aarch64");
+}
+
 int main(void)
 {
 	char root[] = "/tmp/cixcache-test-store-XXXXXX";
@@ -447,6 +535,7 @@ int main(void)
 	test_canonical_alias(root);
 	test_canonicalize_migration(root);
 	test_list_order(root);
+	test_arch(root);
 
 	if (g_failures == 0)
 		printf("test_store: ok\n");

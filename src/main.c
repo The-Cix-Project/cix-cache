@@ -408,6 +408,7 @@ static void serve_artifact(struct conn *cc, const struct http_request *req, cons
 	char extra[STORE_SHA256_MAX + 32];
 	char digest[STORE_SHA256_MAX];
 	char canonical[STORE_NAME_MAX];
+	char served[STORE_NAME_MAX];
 	enum store_error e;
 	off_t size = 0;
 	int fd = -1;
@@ -416,7 +417,7 @@ static void serve_artifact(struct conn *cc, const struct http_request *req, cons
 		respond_error(cc, 401, "authentication required");
 		return;
 	}
-	e = store_open(name, &fd, &size, digest, sizeof(digest));
+	e = store_open(name, &fd, &size, digest, sizeof(digest), served, sizeof(served));
 	if (e != STORE_OK) {
 		/*
 		 * A miss is the ordinary answer, not a fault: the host builds
@@ -436,6 +437,21 @@ static void serve_artifact(struct conn *cc, const struct http_request *req, cons
 		 * misses are counted separately. "Not cached" and "cached but
 		 * unreachable" must not look the same from the outside.
 		 */
+		/*
+		 * Ambiguity is not a miss. A miss means "build from source"
+		 * and is harmless; this means the store holds this name for
+		 * more than one machine and will not guess between them. It
+		 * has to be loud, because it is the one case where answering
+		 * would be worse than failing.
+		 */
+		if (e == STORE_ERR_AMBIGUOUS) {
+			snprintf(cc->note, sizeof(cc->note), "AMBIG ");
+			server_log("err", "ambiguous: %s exists for more than one architecture -- the "
+			                  "requester must name one",
+			           name);
+			respond_error(cc, 409, store_error_str(e));
+			return;
+		}
 		g_artifact_misses++;
 		snprintf(cc->note, sizeof(cc->note), "MISS ");
 		respond_error(cc, e == STORE_ERR_INVALID_NAME ? 400 : 404, store_error_str(e));
@@ -449,11 +465,12 @@ static void serve_artifact(struct conn *cc, const struct http_request *req, cons
 	 * that, precisely because the alias works, so say it here. The
 	 * note is too small for a name, so the detail goes to the log.
 	 */
-	if (store_canonical_name(name, canonical, sizeof(canonical)) == 1) {
+	if (store_canonical_name(name, canonical, sizeof(canonical)) == 1 ||
+	    strcmp(served, name) != 0) {
 		g_artifact_aliases++;
 		snprintf(cc->note, sizeof(cc->note), "ALIAS ");
 		server_log("warn", "alias: %s served as %s -- the requester is using a "
-		                   "non-canonical name", name, canonical);
+		                   "non-canonical name", name, served);
 	} else {
 		snprintf(cc->note, sizeof(cc->note), "HIT ");
 	}
@@ -726,6 +743,7 @@ static int list_entry(const char *name, const char *digest, off_t size, time_t m
 
 	char short_name[STORE_NAME_MAX];
 	char version[STORE_NAME_MAX];
+	char arch[STORE_NAME_MAX];
 	int release = 1;
 
 	/*
@@ -741,7 +759,8 @@ static int list_entry(const char *name, const char *digest, off_t size, time_t m
 	 * alone. A name carrying no release reports 1, which is what it
 	 * means.
 	 */
-	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version), &release);
+	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version), &release,
+	                    arch, sizeof(arch));
 	jw_obj_open(lc->w);
 	jw_key(lc->w, "name");
 	jw_str(lc->w, name);
@@ -751,6 +770,13 @@ static int list_entry(const char *name, const char *digest, off_t size, time_t m
 	jw_str(lc->w, version);
 	jw_key(lc->w, "release");
 	jw_int(lc->w, release);
+	/*
+	 * Empty for an artifact that names no architecture. Reported as
+	 * absent rather than guessed, because the store genuinely does not
+	 * know -- see ADR-0008.
+	 */
+	jw_key(lc->w, "arch");
+	jw_str(lc->w, arch);
 	jw_key(lc->w, "sha256");
 	jw_str(lc->w, digest);
 	jw_key(lc->w, "bytes");
@@ -772,7 +798,8 @@ static int count_entry(const char *name, const char *digest, off_t size, time_t 
 
 	(void)digest;
 	(void)mtime;
-	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version), NULL);
+	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version), NULL, NULL,
+	                    0);
 	remember_name(lc, short_name);
 	lc->count++;
 	if (size > 0)
@@ -1497,6 +1524,7 @@ static void usage(FILE *out)
 	        "                 [--web-root=DIR] [--push-token=TOK] [--pull-token=TOK]\n"
 	        "       cixcached --import [--dry-run] [--root=DIR]\n"
 	        "       cixcached --canonicalize [--dry-run] [--root=DIR]\n"
+	        "       cixcached --set-arch=ARCH [--dry-run] [--root=DIR]\n"
 	        "       cixcached --version\n");
 }
 
@@ -1506,6 +1534,7 @@ int main(int argc, char **argv)
 	struct conn *listener;
 	int do_import = 0;
 	int do_canonicalize = 0;
+	const char *set_arch = NULL;
 	int dry_run = 0;
 	int listen_fd;
 	int i;
@@ -1538,6 +1567,8 @@ int main(int argc, char **argv)
 			do_import = 1;
 		else if (strcmp(argv[i], "--canonicalize") == 0)
 			do_canonicalize = 1;
+		else if (strncmp(argv[i], "--set-arch=", 11) == 0)
+			set_arch = argv[i] + 11;
 		else if (strcmp(argv[i], "--dry-run") == 0)
 			dry_run = 1;
 		else if (strcmp(argv[i], "--version") == 0) {
@@ -1576,6 +1607,21 @@ int main(int argc, char **argv)
 		int rc = store_canonicalize(dry_run, &renamed, &conflicts);
 
 		printf("%s %d entries, %d conflicts\n", dry_run ? "would rename" : "renamed", renamed,
+		       conflicts);
+		return rc == 0 && conflicts == 0 ? 0 : 1;
+	}
+
+	/*
+	 * An assertion an operator makes, never an inference: it says
+	 * "everything already in this store was built for ARCH". Nothing
+	 * else in the server will ever add an architecture to a name.
+	 */
+	if (set_arch != NULL) {
+		int renamed = 0;
+		int conflicts = 0;
+		int rc = store_set_arch(set_arch, dry_run, &renamed, &conflicts);
+
+		printf("%s %d entries, %d conflicts\n", dry_run ? "would stamp" : "stamped", renamed,
 		       conflicts);
 		return rc == 0 && conflicts == 0 ? 0 : 1;
 	}

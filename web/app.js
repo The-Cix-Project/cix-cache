@@ -203,6 +203,12 @@ function resultRow(a) {
 	relCell.textContent = a.release;
 	row.appendChild(relCell);
 
+	const archCell = document.createElement("td");
+
+	archCell.className = "mono num rel arch-col";
+	archCell.textContent = a.arch || "-";
+	row.appendChild(archCell);
+
 	const sizeCell = document.createElement("td");
 	sizeCell.className = "num";
 	sizeCell.textContent = a.bytes < 0 ? "dangling" : humanBytes(a.bytes);
@@ -249,6 +255,7 @@ function resultRow(a) {
  */
 const SORT_DIR_FIRST = {
 	artifact: 1,
+	arch: 1,
 	version: -1,
 	release: -1,
 	bytes: -1,
@@ -301,6 +308,8 @@ function sortCmp(a, b) {
 		 * stays a wart in one column rather than a correctness bug.
 		 */
 		r = a.version.localeCompare(b.version, undefined, { numeric: true });
+	} else if (k === "arch") {
+		r = (a.arch || "").localeCompare(b.arch || "");
 	} else {
 		r = a.artifact.localeCompare(b.artifact, undefined, { numeric: true });
 	}
@@ -354,6 +363,30 @@ function renderResults() {
 
 	shown.sort(sortCmp);
 
+	/*
+	 * The architecture column earns its place only when it tells rows
+	 * apart. While the whole store is one architecture it is the same
+	 * word 125 times, and while none is stamped it is empty -- either
+	 * way it is a column of noise. It appears by itself the moment two
+	 * artifacts disagree, which is exactly when reading a row without
+	 * it would be a mistake.
+	 */
+	{
+		const seen = {};
+		let distinct = 0;
+		let i;
+
+		for (i = 0; i < shown.length; i++) {
+			const v = shown[i].arch || "";
+
+			if (seen[v] === undefined) {
+				seen[v] = 1;
+				distinct++;
+			}
+		}
+		el("results").classList.toggle("show-arch", distinct > 1);
+	}
+
 	const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
 
 	if (page >= pages)
@@ -364,7 +397,7 @@ function renderResults() {
 		const row = document.createElement("tr");
 		const cell = document.createElement("td");
 
-		cell.colSpan = 6;
+		cell.colSpan = 7;
 		cell.className = "empty";
 		cell.textContent = "Nothing matches “" + query + "”.";
 		row.appendChild(cell);

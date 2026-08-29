@@ -56,8 +56,48 @@ enum store_error {
 	STORE_ERR_INVALID_NAME,
 	STORE_ERR_NOT_FOUND,
 	STORE_ERR_CONFLICT,
+	/*
+	 * A name without an architecture matched more than one artifact.
+	 * Refusing is the whole point: a checksum cannot catch an artifact
+	 * that is intact but built for another machine, so the one thing
+	 * this store must never do is pick one.
+	 */
+	STORE_ERR_AMBIGUOUS,
 	STORE_ERR_IO
 };
+
+/*
+ * Architectures this store recognises in a name, spelled as uname -m
+ * spells them -- which is also how cix-build-system's ADR-0001 spells
+ * them, and there must be exactly one spelling across the three repos.
+ *
+ * NULL-terminated. Recognition is a whitelist and not a pattern
+ * because the trailing component of a name is otherwise ordinary text:
+ * only a listed word is an architecture, so nothing else can
+ * accidentally become one.
+ */
+const char *const *store_arches(void);
+
+/*
+ * The architecture encoded in a name, or NULL if it carries none.
+ * out may be NULL when only the presence matters.
+ */
+const char *store_arch_of(const char *name, char *out, size_t out_size);
+
+/*
+ * Stamps an architecture onto every published entry that has none.
+ *
+ * This is an operator ASSERTION, not an inference, which is why it is
+ * a separate command and takes the architecture as an argument.
+ * Canonicalisation deliberately never invents one: storing a bare push
+ * as x86_64 would attach a claim the pusher never made, and an aarch64
+ * build pushed under a bare name would end up labelled x86_64 -- a
+ * false statement about the bytes, which is worse than no statement.
+ *
+ * Renames symlinks only. Returns 0, or -1 on an error that stopped the
+ * pass. Either count pointer may be NULL.
+ */
+int store_set_arch(const char *arch, int dry_run, int *out_renamed, int *out_conflicts);
 
 /*
  * Creates root/{blobs,packages,tmp} if absent. Returns 0, or -1 with
@@ -150,7 +190,8 @@ int store_canonicalize(int dry_run, int *out_renamed, int *out_conflicts);
  * out_release may be NULL.
  */
 void store_split_display(const char *name, char *out_name, size_t out_name_size, char *out_version,
-                         size_t out_version_size, int *out_release);
+                         size_t out_version_size, int *out_release, char *out_arch,
+                         size_t out_arch_size);
 
 /*
  * Resolves a published name to the digest its symlink points at,
@@ -161,11 +202,28 @@ void store_split_display(const char *name, char *out_name, size_t out_name_size,
 enum store_error store_resolve(const char *name, char *out_digest, size_t out_digest_size);
 
 /*
+ * Resolves, and reports which entry actually answered.
+ *
+ * A name carrying no architecture is matched against each known one,
+ * and resolves only if EXACTLY ONE exists. That is the transitional
+ * rule that lets recipes written before architectures keep working:
+ * while the store holds one architecture a bare name is unambiguous,
+ * and the moment a second appears the same name stops resolving rather
+ * than starting to serve a coin flip. See
+ * docs/adr/0008-architecture-in-artifact-names.md.
+ *
+ * out_name may be NULL; it receives the on-disk name that answered,
+ * which is what lets a caller report that an alias was used.
+ */
+enum store_error store_resolve_as(const char *name, char *out_digest, size_t out_digest_size,
+                                  char *out_name, size_t out_name_size);
+
+/*
  * Resolves and opens. On STORE_OK the caller owns *out_fd. out_digest
  * may be NULL if the caller does not need it.
  */
 enum store_error store_open(const char *name, int *out_fd, off_t *out_size, char *out_digest,
-                            size_t out_digest_size);
+                            size_t out_digest_size, char *out_name, size_t out_name_size);
 
 /*
  * Points name at digest. Idempotent when the name already resolves to

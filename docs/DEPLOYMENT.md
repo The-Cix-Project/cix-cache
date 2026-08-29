@@ -131,6 +131,33 @@ Skipping the migration is the one failure worth knowing about: an
 unmigrated entry stays listed but stops resolving, which looks exactly
 like a cache that is simply never used.
 
+## Stamping the architecture
+
+Artifact names carry the machine they were built for. Nothing infers
+one — storing a bare push as `x86_64` would attach a claim the pusher
+never made — so an existing store is stamped once, explicitly:
+
+```
+build/cixcached --root=cache --set-arch=x86_64 --dry-run   # report
+build/cixcached --root=cache --set-arch=x86_64             # do it
+```
+
+Symlinks only; no blob moves. It is an assertion that everything
+already in the store was built for that machine, which is why it takes
+the architecture as an argument rather than guessing it from `uname`.
+
+**Existing hosts need no change.** A request without an architecture
+resolves while exactly one is published. When a second appears, that
+same request returns `409` instead of guessing:
+
+```
+{"error":"that name exists for more than one architecture -- ask for one"}
+```
+
+That is the intended behaviour, not a regression: a content checksum
+cannot tell an aarch64 binary from an x86_64 one, so a name that could
+mean either must mean neither.
+
 ## Operating
 
 ```

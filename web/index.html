@@ -84,6 +84,7 @@
 							<th class="sortable" data-sort="artifact" tabindex="0" aria-sort="none">Artifact</th>
 							<th class="num sortable" data-sort="version" tabindex="0" aria-sort="none">Version</th>
 							<th class="num sortable" data-sort="release" tabindex="0" aria-sort="none">Rel</th>
+							<th class="num sortable arch-col" data-sort="arch" tabindex="0" aria-sort="none">Arch</th>
 							<th class="num sortable" data-sort="bytes" tabindex="0" aria-sort="none">Size</th>
 							<th>sha256</th>
 							<th class="num sortable" data-sort="modified" tabindex="0" aria-sort="descending">Published</th>
@@ -158,6 +159,14 @@ cixctl --host=&lt;box&gt; pkg sync</code></pre>
 			<code>version</code> is upstream's, verbatim &mdash; Cix never reformats it.
 			<code>release</code> is Cix's own packaging revision <em>of</em> that version,
 			and moves when the recipe changes and upstream does not.
+		</p>
+		<p>
+			Once a store is stamped, a name also carries the machine it was built for
+			&mdash; <code>bash-5.2.37-1-x86_64</code> &mdash; spelled as <code>uname -m</code>
+			spells it. A checksum cannot tell an aarch64 binary from an x86_64 one, so the
+			name is the only thing that can. A request without an architecture resolves
+			while exactly one is published, and returns <span class="tag warn">409</span>
+			once two are, rather than picking one.
 		</p>
 		<p class="note">
 			A name written the old way still works. A push under one is stored

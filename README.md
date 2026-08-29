@@ -47,6 +47,13 @@ cix-v2.2.0-rc6-1    name=cix     version=v2.2.0-rc6  release=1
 revision of that version, and moves when the recipe changes and upstream
 does not.
 
+Once stamped, a name also carries the machine it was built for —
+`bash-5.2.37-1-x86_64` — spelled as `uname -m` spells it. A checksum
+cannot tell an aarch64 binary from an x86_64 one, so the name is the
+only thing that can. A bare name resolves while exactly one architecture
+is published and **stops resolving** as soon as two are, rather than
+picking. See `docs/adr/0008-architecture-in-artifact-names.md`.
+
 A push under a non-canonical name is **stored canonically**, and a fetch
 under one is served as an **alias** of the canonical entry — one file,
 one checksum, both spellings resolving to it. So recipes written before
