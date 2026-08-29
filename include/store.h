@@ -220,6 +220,43 @@ int store_walk(int (*fn)(const char *name, const char *digest, off_t size, time_
                void *ctx);
 
 /*
+ * One published entry, as store_list() reports it.
+ */
+struct store_entry {
+	char name[STORE_NAME_MAX];
+	char digest[STORE_SHA256_MAX];
+	off_t size;
+	time_t mtime;
+};
+
+/*
+ * Collects every published entry into one array, which the caller owns
+ * and must free(). Returns the count, or -1.
+ *
+ * Exists so listings can be ORDERED. store_walk() reports readdir
+ * order, which is whatever the filesystem's hashing happened to
+ * produce: fine for the collector, which only needs to see everything
+ * once, and useless to a person reading a few hundred rows.
+ */
+int store_list(struct store_entry **out);
+
+/*
+ * Comparators for that array.
+ *
+ * store_cmp_newest -- most recently published first, ties broken on
+ * name. The tiebreak is not cosmetic: mtimes are whole seconds and a
+ * pushed batch ties constantly, and an order that is not total lets
+ * rows swap places between the dashboard's polls.
+ *
+ * store_cmp_name -- by name. For MANIFEST.json, which exists to be
+ * compared against another copy of itself. That file already leaves
+ * out mtime so identical stores produce identical manifests; readdir
+ * order defeated that on its own.
+ */
+int store_cmp_newest(const void *a, const void *b);
+int store_cmp_name(const void *a, const void *b);
+
+/*
  * Removes every blob no published name points at, and returns how many
  * went. Builds the live set by reading every symlink target, because
  * with symlinks a blob's inode carries no refcount.

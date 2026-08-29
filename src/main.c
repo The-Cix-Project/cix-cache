@@ -905,7 +905,26 @@ static void api_artifacts(struct conn *cc)
 	jw_obj_open(&w);
 	jw_key(&w, "artifacts");
 	jw_arr_open(&w);
-	store_walk(list_entry, &lc);
+	/*
+	 * Most recently published first. The dashboard is search-first, so
+	 * finding a known name is the search box's job and the list is
+	 * free to answer the other question an operator has: what landed.
+	 *
+	 * Sorted here rather than in the dashboard and the CLI separately,
+	 * so every consumer of this endpoint sees one order.
+	 */
+	{
+		struct store_entry *ents = NULL;
+		int n = store_list(&ents);
+		int i;
+
+		if (n > 0) {
+			qsort(ents, (size_t)n, sizeof(*ents), store_cmp_newest);
+			for (i = 0; i < n; i++)
+				list_entry(ents[i].name, ents[i].digest, ents[i].size, ents[i].mtime, &lc);
+		}
+		free(ents);
+	}
 	jw_arr_close(&w);
 	jw_key(&w, "count");
 	jw_int(&w, lc.count);

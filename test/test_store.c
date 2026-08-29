@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 static int g_failures;
@@ -341,6 +342,87 @@ static void test_canonicalize_migration(const char *root)
 	      "migrating an already-canonical store is a no-op");
 }
 
+/*
+ * Listings have to be ordered. readdir order is whatever the
+ * filesystem's hashing produced, which for a few hundred rows is just
+ * noise -- and worse, it is not stable, so a manifest generated twice
+ * from the same store can differ.
+ */
+static void test_list_order(const char *root)
+{
+	struct store_entry *ents = NULL;
+	char digest[STORE_SHA256_MAX];
+	char tmp[512];
+	char link[512];
+	char target[128];
+	int n;
+	int i;
+	int ok;
+
+	snprintf(tmp, sizeof(tmp), "%s/tmp/ordered", root);
+	write_file(tmp, "ordered payload");
+	CHECK(store_hash_file(tmp, digest, sizeof(digest)) == 0, "hash the ordering payload");
+	CHECK(store_blob_adopt(tmp, digest) == STORE_OK, "adopt the ordering blob");
+
+	/* Three names, published with mtimes a minute apart. */
+	snprintf(target, sizeof(target), "../blobs/%s", digest);
+	for (i = 0; i < 3; i++) {
+		struct timespec times[2];
+
+		snprintf(link, sizeof(link), "%s/%s/ord%d-1.0-1.tar.gz", root, STORE_DIR, i);
+		CHECK(symlink(target, link) == 0, "place an ordering entry");
+		times[0].tv_sec = 1000000 + i * 60;
+		times[0].tv_nsec = 0;
+		times[1] = times[0];
+		CHECK(utimensat(AT_FDCWD, link, times, AT_SYMLINK_NOFOLLOW) == 0, "set its mtime");
+	}
+
+	n = store_list(&ents);
+	CHECK(n >= 3, "store_list returns every entry");
+
+	qsort(ents, (size_t)n, sizeof(*ents), store_cmp_newest);
+	ok = 1;
+	for (i = 1; i < n; i++) {
+		if (ents[i - 1].mtime < ents[i].mtime)
+			ok = 0;
+	}
+	CHECK(ok, "newest first: mtime never increases down the list");
+
+	/*
+	 * Relative order among the three placed here, not absolute
+	 * position: the store also holds entries from the tests above,
+	 * stamped with the real clock.
+	 */
+	{
+		int at[3];
+
+		for (i = 0; i < 3; i++)
+			at[i] = -1;
+		for (i = 0; i < n; i++) {
+			if (strncmp(ents[i].name, "ord", 3) == 0 && ents[i].name[3] >= '0' &&
+			    ents[i].name[3] <= '2')
+				at[ents[i].name[3] - '0'] = i;
+		}
+		CHECK(at[0] >= 0 && at[1] >= 0 && at[2] >= 0, "all three ordering entries are listed");
+		CHECK(at[2] < at[1] && at[1] < at[0], "the most recently published of them comes first");
+	}
+
+	/*
+	 * The three placed here share nothing but their mtimes are
+	 * distinct; give two the same mtime and the tiebreak must still
+	 * produce one definite order, or rows swap between polls.
+	 */
+	qsort(ents, (size_t)n, sizeof(*ents), store_cmp_name);
+	ok = 1;
+	for (i = 1; i < n; i++) {
+		if (strcmp(ents[i - 1].name, ents[i].name) >= 0)
+			ok = 0;
+	}
+	CHECK(ok, "by name: strictly ascending, so a manifest is reproducible");
+
+	free(ents);
+}
+
 int main(void)
 {
 	char root[] = "/tmp/cixcache-test-store-XXXXXX";
@@ -364,6 +446,7 @@ int main(void)
 	 */
 	test_canonical_alias(root);
 	test_canonicalize_migration(root);
+	test_list_order(root);
 
 	if (g_failures == 0)
 		printf("test_store: ok\n");

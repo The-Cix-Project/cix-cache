@@ -2,6 +2,7 @@
 
 #include "store.h"
 
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -44,7 +45,23 @@ void manifest_write_json(struct json_writer *w)
 	jw_obj_open(w);
 	jw_key(w, "packages");
 	jw_obj_open(w);
-	store_walk(emit_entry, w);
+	/*
+	 * By name, so that two servers holding the same artifacts emit
+	 * byte-identical manifests. Leaving mtime out (above) was half of
+	 * that; readdir order defeated the other half.
+	 */
+	{
+		struct store_entry *ents = NULL;
+		int n = store_list(&ents);
+		int i;
+
+		if (n > 0) {
+			qsort(ents, (size_t)n, sizeof(*ents), store_cmp_name);
+			for (i = 0; i < n; i++)
+				emit_entry(ents[i].name, ents[i].digest, ents[i].size, ents[i].mtime, w);
+		}
+		free(ents);
+	}
 	jw_obj_close(w);
 	jw_obj_close(w);
 }

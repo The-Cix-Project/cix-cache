@@ -672,6 +672,66 @@ int store_canonicalize(int dry_run, int *out_renamed, int *out_conflicts)
 	return rc;
 }
 
+struct entry_set {
+	struct store_entry *v;
+	size_t count;
+	size_t cap;
+};
+
+static int collect_entry(const char *name, const char *digest, off_t size, time_t mtime, void *ctx)
+{
+	struct entry_set *set = ctx;
+	struct store_entry *e;
+
+	if (set->count == set->cap) {
+		size_t cap = set->cap != 0 ? set->cap * 2 : 64;
+		struct store_entry *grown = realloc(set->v, cap * sizeof(*grown));
+
+		if (grown == NULL)
+			return -1;
+		set->v = grown;
+		set->cap = cap;
+	}
+	e = &set->v[set->count];
+	snprintf(e->name, sizeof(e->name), "%s", name);
+	snprintf(e->digest, sizeof(e->digest), "%s", digest);
+	e->size = size;
+	e->mtime = mtime;
+	set->count++;
+	return 0;
+}
+
+int store_list(struct store_entry **out)
+{
+	struct entry_set set;
+
+	set.v = NULL;
+	set.count = 0;
+	set.cap = 0;
+	if (store_walk(collect_entry, &set) != 0) {
+		free(set.v);
+		return -1;
+	}
+	*out = set.v;
+	return (int)set.count;
+}
+
+int store_cmp_newest(const void *a, const void *b)
+{
+	const struct store_entry *x = a;
+	const struct store_entry *y = b;
+
+	if (x->mtime != y->mtime)
+		return x->mtime < y->mtime ? 1 : -1;
+	/* Names are unique, so this makes the order total and stable. */
+	return strcmp(x->name, y->name);
+}
+
+int store_cmp_name(const void *a, const void *b)
+{
+	return strcmp(((const struct store_entry *)a)->name, ((const struct store_entry *)b)->name);
+}
+
 static int digest_cmp(const void *a, const void *b)
 {
 	return strcmp((const char *)a, (const char *)b);
