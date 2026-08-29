@@ -864,3 +864,29 @@ footer {
 	width: 3.5rem;
 	color: var(--muted);
 }
+
+/* ---------- sortable columns ---------- */
+
+th.sortable {
+	cursor: pointer;
+	user-select: none;
+}
+
+th.sortable:hover,
+th.sortable:focus-visible {
+	color: var(--accent);
+}
+
+/*
+ * The caret marks the active column only. Reserving room for one on
+ * every sortable header would pull the numeric columns out of line
+ * with the figures underneath them, which is a worse trade than the
+ * small shift when the sort changes.
+ */
+th.sortable[aria-sort="ascending"]::after {
+	content: " \25B4";
+}
+
+th.sortable[aria-sort="descending"]::after {
+	content: " \25BE";
+}

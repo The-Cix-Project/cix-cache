@@ -81,12 +81,12 @@
 				<table>
 					<thead>
 						<tr>
-							<th>Artifact</th>
-							<th class="num">Version</th>
-							<th class="num">Rel</th>
-							<th class="num">Size</th>
+							<th class="sortable" data-sort="artifact" tabindex="0" aria-sort="none">Artifact</th>
+							<th class="num sortable" data-sort="version" tabindex="0" aria-sort="none">Version</th>
+							<th class="num sortable" data-sort="release" tabindex="0" aria-sort="none">Rel</th>
+							<th class="num sortable" data-sort="bytes" tabindex="0" aria-sort="none">Size</th>
 							<th>sha256</th>
-							<th class="num">Published</th>
+							<th class="num sortable" data-sort="modified" tabindex="0" aria-sort="descending">Published</th>
 						</tr>
 					</thead>
 					<tbody id="rows"></tbody>

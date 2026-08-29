@@ -234,6 +234,109 @@ function resultRow(a) {
 	return row;
 }
 
+/*
+ * Column sorting.
+ *
+ * The server already sends newest-published first, and that stays the
+ * default here: on a search-first page the list answers "what landed",
+ * and finding a known name is the search box's job. Sorting is for the
+ * other times -- scanning everything for something specific, or finding
+ * what is taking up the room.
+ *
+ * Which direction a column opens in depends on the column. Text wants
+ * A-Z first; a size, a release or a date almost always wants the
+ * largest or newest first, because that is the reason you clicked it.
+ */
+const SORT_DIR_FIRST = {
+	artifact: 1,
+	version: -1,
+	release: -1,
+	bytes: -1,
+	modified: -1,
+};
+
+let sort = loadSort();
+
+function loadSort() {
+	try {
+		const raw = localStorage.getItem("cixcache-sort");
+
+		if (raw !== null) {
+			const s = JSON.parse(raw);
+
+			if (SORT_DIR_FIRST[s.key] !== undefined && (s.dir === 1 || s.dir === -1))
+				return s;
+		}
+	} catch (e) {
+		/* private mode, blocked storage, or something we did not write */
+	}
+	return { key: "modified", dir: -1 };
+}
+
+function saveSort() {
+	try {
+		localStorage.setItem("cixcache-sort", JSON.stringify(sort));
+	} catch (e) {
+		/* the sort still applies, it just will not survive a reload */
+	}
+}
+
+function sortCmp(a, b) {
+	const k = sort.key;
+	let r;
+
+	if (k === "bytes" || k === "release" || k === "modified") {
+		r = a[k] - b[k];
+	} else if (k === "version") {
+		/*
+		 * Numeric collation, so 2.1.10 sorts after 2.1.8 instead of
+		 * before it as a plain string compare would.
+		 *
+		 * This is a display order and not a version ordering. A
+		 * prerelease sorts AFTER its final release here -- v2.2.0-rc6
+		 * lands after v2.2.0, being a longer string with the same
+		 * prefix -- where it semantically precedes it. Getting that
+		 * right needs real version comparison with prerelease rules.
+		 * Nothing resolves an artifact by comparing versions, so this
+		 * stays a wart in one column rather than a correctness bug.
+		 */
+		r = a.version.localeCompare(b.version, undefined, { numeric: true });
+	} else {
+		r = a.artifact.localeCompare(b.artifact, undefined, { numeric: true });
+	}
+	if (r !== 0)
+		return r * sort.dir;
+	/*
+	 * Names are unique, so this makes the order total. Without it,
+	 * equal keys leave rows free to swap places on every poll.
+	 */
+	return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+}
+
+function applySortIndicators() {
+	const heads = document.querySelectorAll("th.sortable");
+	let i;
+
+	for (i = 0; i < heads.length; i++) {
+		const on = heads[i].dataset.sort === sort.key;
+
+		heads[i].setAttribute("aria-sort",
+			on ? (sort.dir === 1 ? "ascending" : "descending") : "none");
+	}
+}
+
+function setSort(key) {
+	if (sort.key === key)
+		sort.dir = -sort.dir;
+	else
+		sort = { key: key, dir: SORT_DIR_FIRST[key] };
+	saveSort();
+	/* A re-sorted list makes the page you were on meaningless. */
+	page = 0;
+	applySortIndicators();
+	renderResults();
+}
+
 function renderResults() {
 	const results = el("results");
 	const body = el("rows");
@@ -248,6 +351,9 @@ function renderResults() {
 		return;
 
 	const shown = cache.artifacts.filter(matches);
+
+	shown.sort(sortCmp);
+
 	const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
 
 	if (page >= pages)
@@ -533,6 +639,25 @@ function readHash() {
 		query = "";
 	}
 	el("q").value = query;
+}
+
+{
+	const heads = document.querySelectorAll("th.sortable");
+	let i;
+
+	for (i = 0; i < heads.length; i++) {
+		const th = heads[i];
+
+		th.addEventListener("click", () => setSort(th.dataset.sort));
+		/* Reachable without a mouse: they are focusable, so honour keys. */
+		th.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") {
+				e.preventDefault();
+				setSort(th.dataset.sort);
+			}
+		});
+	}
+	applySortIndicators();
 }
 
 el("q").addEventListener("input", (e) => {
