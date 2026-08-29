@@ -22,6 +22,8 @@ let logSeq = 0;
 let browsing = false;
 /* "" means every architecture; otherwise the one being shown. */
 let archFilter = "";
+/* What the chip strip was last built from, so it is not rebuilt blind. */
+let archChipsKey = null;
 
 const el = (id) => document.getElementById(id);
 const ledTx = el("led-tx");
@@ -426,7 +428,9 @@ function renderResults() {
 		cell.textContent = query !== ""
 			? "Nothing matches “" + query + "”" +
 			  (archFilter !== "" ? " on " + archFilter : "") + "."
-			: "Nothing published for " + archFilter + ".";
+			: archFilter !== ""
+				? "Nothing published for " + archFilter + "."
+				: "Nothing published yet.";
 		row.appendChild(cell);
 		body.appendChild(row);
 	}
@@ -746,19 +750,32 @@ function renderArchChips() {
 	}
 	list.sort();
 
+	/* Never leave a filter on that the user can no longer see. */
+	if (archFilter !== "" && seen[archFilter] === undefined) {
+		archFilter = "";
+		syncHash();
+	}
+
+	/*
+	 * Rebuilt only when the set of architectures or the selection has
+	 * actually changed. renderResults() runs on every poll, and
+	 * replacing these buttons every two seconds would take the
+	 * keyboard focus off one while it was being used, and undo a
+	 * :hover under the pointer.
+	 */
+	const key = list.join(",") + "|" + archFilter;
+
+	if (key === archChipsKey)
+		return;
+	archChipsKey = key;
+
+	host.textContent = "";
 	if (list.length < 2) {
 		host.hidden = true;
-		host.textContent = "";
-		/* Never leave a filter on that the user can no longer see. */
-		if (archFilter !== "" && seen[archFilter] === undefined) {
-			archFilter = "";
-			syncHash();
-		}
 		return;
 	}
 
 	host.hidden = false;
-	host.textContent = "";
 	list.unshift("");
 	for (i = 0; i < list.length; i++) {
 		const value = list[i];
@@ -835,7 +852,15 @@ el("q-clear").addEventListener("click", () => {
 
 el("btn-browse").addEventListener("click", () => {
 	browsing = !browsing;
+	/*
+	 * The label says everything, so it has to mean it. Leaving an
+	 * architecture filter on would show a subset under a control that
+	 * promises the opposite -- and the chip that set it is the only
+	 * thing on screen saying otherwise.
+	 */
+	archFilter = "";
 	page = 0;
+	syncHash();
 	renderResults();
 });
 
