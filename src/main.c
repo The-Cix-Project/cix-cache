@@ -693,6 +693,15 @@ struct list_ctx {
 	/* Set per entry before list_entry(), which has a fixed signature. */
 	int version_rank;
 	long count;
+	/*
+	 * Published entries carrying no architecture. Every push from a
+	 * daemon that does not send one creates another, and each is a
+	 * name that cannot be told apart from a build for another machine
+	 * until it is stamped. Counted because it is otherwise invisible:
+	 * they resolve and serve correctly right up until the day they do
+	 * not (ADR-0005, and #6).
+	 */
+	long unstamped;
 	long long bytes;
 	/*
 	 * Distinct artifact names, as opposed to published files. This
@@ -811,6 +820,8 @@ static int count_entry(const char *name, const char *digest, off_t size, time_t 
 	(void)mtime;
 	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version), NULL, NULL,
 	                    0);
+	if (store_arch_of(name, NULL, 0) == NULL)
+		lc->unstamped++;
 	remember_name(lc, short_name);
 	lc->count++;
 	if (size > 0)
@@ -916,6 +927,8 @@ static void api_status(struct conn *cc)
 	jw_int(&w, g_artifact_aliases);
 	jw_key(&w, "served_bytes");
 	jw_int(&w, g_served_bytes);
+	jw_key(&w, "unstamped");
+	jw_int(&w, pkgs.unstamped);
 	jw_key(&w, "packages");
 	jw_int(&w, pkgs.count);
 	jw_key(&w, "unique_packages");

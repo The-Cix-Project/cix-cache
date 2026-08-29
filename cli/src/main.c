@@ -169,6 +169,14 @@ static void fmt_status(const struct json_value *v)
 	fprintf(g_out, "packages:  %lld unique, %lld artifacts (%lld bytes)\n",
 	        int_field(v, "unique_packages"), int_field(v, "packages"),
 	        int_field(v, "package_bytes"));
+	/*
+	 * Only when there are any. An artifact with no architecture serves
+	 * correctly until the day a build for another machine shares its
+	 * name, so nothing else will ever mention it.
+	 */
+	if (int_field(v, "unstamped") > 0)
+		fprintf(g_out, "unstamped: %lld with no architecture -- run --set-arch\n",
+		        int_field(v, "unstamped"));
 	fprintf(g_out, "pull:      %s\n", bool_field(v, "pull_open") ? "open" : "token required");
 	fprintf(g_out, "push:      %s\n", bool_field(v, "push_configured") ? "token required" : "OPEN");
 }

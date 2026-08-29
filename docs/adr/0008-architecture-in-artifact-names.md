@@ -54,9 +54,18 @@ thing an operator can know and a parser cannot.
 
 ### 3. A bare name resolves only while it is unambiguous
 
-A request carrying no architecture is matched against each known one and
-resolves **only if exactly one** exists. If two do, it fails with 409
-and names the problem.
+A request carrying no architecture is matched against each known one,
+**and against the entry stored without one**, and resolves only if
+exactly one candidate exists. If two do, it fails with 409.
+
+The archless entry being a *candidate* rather than an answer is the
+part that took a second pass to get right (#6). Resolution tries the
+exact name first, so returning it the moment it matched let it win
+before the architectures were looked at — and an artifact stored
+without an architecture then bypassed this check completely. Since
+nothing infers an architecture (§2), every push from a daemon that does
+not send one creates another such entry, so ordinary use was widening
+the hole rather than leaving it fixed in size.
 
 This is what makes the migration free. Every recipe in git today derives
 a bare URL, and 125 artifacts answer to one. Refusing those outright
@@ -92,6 +101,15 @@ failure becomes impossible the moment both architectures are published,
 rather than becoming likely. Closing the remaining gap is `cix#179`:
 once the daemon sends arch-qualified names, the bare alias should be
 removed here, and that removal is the last step, not this one.
+
+Because nothing infers an architecture, a store drifts back towards
+unstamped as it is pushed to, and `--set-arch` has to be re-run until
+the daemon sends architectures itself. That drift is now counted and
+reported — `unstamped` in `/api/v1/status`, a line in `cixcachectl
+status`, and a warning-coloured figure in the menu bar — because an
+unstamped artifact serves correctly right up until the day another
+machine's build shares its name, which is exactly the shape of thing
+ADR-0005 says has to be made visible.
 
 Deliberately not done: rejecting a push whose declared architecture
 disagrees with its name. There is no declaration to compare against —

@@ -437,6 +437,7 @@ static void test_arch(const char *root)
 {
 	char digest_x[STORE_SHA256_MAX];
 	char digest_a[STORE_SHA256_MAX];
+	char digest_bare[STORE_SHA256_MAX];
 	char got[STORE_SHA256_MAX];
 	char resolved[STORE_NAME_MAX];
 	char out[STORE_NAME_MAX];
@@ -502,6 +503,42 @@ static void test_arch(const char *root)
 	      "asking for aarch64 gets the aarch64 bytes");
 	CHECK(store_resolve("archpkg-1.0-1-riscv64.tar.gz", got, sizeof(got)) == STORE_ERR_NOT_FOUND,
 	      "asking for an architecture nobody published is an ordinary miss");
+
+	/*
+	 * #6. An entry stored WITHOUT an architecture is a candidate, not
+	 * an answer. Resolution tries the exact name first, so returning
+	 * it the moment it matched let it win before the architectures
+	 * were looked at -- and an unstamped artifact then bypassed the
+	 * ambiguity check entirely. Every push from a daemon that sends no
+	 * architecture creates one of these, so ordinary use widened the
+	 * hole.
+	 */
+	snprintf(tmp, sizeof(tmp), "%s/tmp/archbare", root);
+	write_file(tmp, "unstamped, really x86_64");
+	CHECK(store_hash_file(tmp, digest_bare, sizeof(digest_bare)) == 0, "hash the unstamped payload");
+	CHECK(store_blob_adopt(tmp, digest_bare) == STORE_OK, "adopt it");
+	CHECK(store_publish("barepkg-2.0-1.tar.gz", digest_bare) == STORE_OK,
+	      "publish with no architecture at all");
+
+	/* Alone, it is the only candidate, so it still resolves. */
+	CHECK(store_resolve("barepkg-2.0-1.tar.gz", got, sizeof(got)) == STORE_OK &&
+	              strcmp(got, digest_bare) == 0,
+	      "an unstamped artifact resolves while nothing competes with it");
+
+	CHECK(store_publish("barepkg-2.0-1-aarch64.tar.gz", digest_a) == STORE_OK,
+	      "now publish another machine's build under the same name");
+	CHECK(store_resolve("barepkg-2.0-1.tar.gz", got, sizeof(got)) == STORE_ERR_AMBIGUOUS,
+	      "the unstamped entry no longer wins by being asked for exactly");
+	/* Naming one still works, and the unstamped one is still reachable. */
+	CHECK(store_resolve("barepkg-2.0-1-aarch64.tar.gz", got, sizeof(got)) == STORE_OK &&
+	              strcmp(got, digest_a) == 0,
+	      "naming the architecture still resolves");
+
+	CHECK(store_unpublish("barepkg-2.0-1.tar.gz") == STORE_OK, "clean up the unstamped entry");
+	CHECK(store_resolve("barepkg-2.0-1.tar.gz", got, sizeof(got)) == STORE_OK &&
+	              strcmp(got, digest_a) == 0,
+	      "with it gone the bare name is unambiguous again");
+	CHECK(store_unpublish("barepkg-2.0-1-aarch64.tar.gz") == STORE_OK, "clean up");
 
 	/* The stamp refuses a machine it does not know, rather than inventing it. */
 	CHECK(store_set_arch("pdp11", 1, &renamed, &conflicts) == -1,

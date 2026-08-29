@@ -925,3 +925,18 @@ th.sortable[aria-sort="descending"]::after {
 .show-arch .arch-col {
 	display: table-cell;
 }
+
+/*
+ * The one warning that lives in the menu bar. It is about what the
+ * registry HOLDS rather than what it is doing, which is why it sits
+ * here and not in the status bar.
+ */
+/*
+ * Compounded with .stat, not on its own: "header .stat" already sets a
+ * muted colour and out-specifies a lone class, so the warning would
+ * render in exactly the grey it is meant to stand out from.
+ */
+.stat.warn-stat {
+	color: var(--warn);
+	font-weight: 600;
+}

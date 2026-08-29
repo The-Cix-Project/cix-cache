@@ -33,7 +33,12 @@ const char *store_error_str(enum store_error e)
 	case STORE_ERR_NOT_FOUND:
 		return "not found";
 	case STORE_ERR_AMBIGUOUS:
-		return "that name exists for more than one architecture -- ask for one";
+		/*
+		 * Not always "more than one architecture": one candidate may
+		 * be an entry stored without any, which needs stamping rather
+		 * than choosing between. So the wording covers both.
+		 */
+		return "that name matches more than one artifact -- name an architecture";
 	case STORE_ERR_CONFLICT:
 		return "already published with a different digest";
 	case STORE_ERR_IO:
@@ -421,31 +426,43 @@ enum store_error store_resolve_as(const char *name, char *out_digest, size_t out
 	if (store_canonical_name(name, canonical, sizeof(canonical)) < 0)
 		return STORE_ERR_INVALID_NAME;
 
-	/* The name as asked for, first. */
 	if (raw_entry_path(canonical, path, sizeof(path)) != 0)
 		return STORE_ERR_INVALID_NAME;
 	e = resolve_path(path, out_digest, out_digest_size);
-	if (e == STORE_OK) {
-		if (out_name != NULL)
-			snprintf(out_name, out_name_size, "%s", canonical);
-		return STORE_OK;
-	}
-	if (e != STORE_ERR_NOT_FOUND)
-		return e;
 
-	/* A request that named an architecture has nothing to fall back to. */
-	if (store_arch_of(canonical, NULL, 0) != NULL)
-		return STORE_ERR_NOT_FOUND;
+	/* A request that named an architecture means that one and no other. */
+	if (store_arch_of(canonical, NULL, 0) != NULL) {
+		if (e == STORE_OK && out_name != NULL)
+			snprintf(out_name, out_name_size, "%s", canonical);
+		return e;
+	}
 
 	/*
-	 * A bare name, against a store whose entries carry architectures.
-	 * It resolves only if exactly one architecture has it. While there
-	 * is one architecture that is every recipe written before this
-	 * existed, still working. When there are two the name stops
-	 * resolving -- which is the point: a checksum cannot tell an
-	 * aarch64 binary from an x86_64 one, so picking either would be
-	 * serving the wrong bytes with a signature that verifies.
+	 * A bare name, against a store whose entries may carry
+	 * architectures. It resolves only if exactly ONE artifact could
+	 * satisfy it. While there is one candidate that is every recipe
+	 * written before architectures existed, still working; when there
+	 * are two the name stops resolving, which is the point. A checksum
+	 * cannot tell an aarch64 binary from an x86_64 one, so picking
+	 * either would be serving the wrong bytes under a signature that
+	 * verifies.
+	 *
+	 * The entry stored WITHOUT an architecture is a candidate here and
+	 * not an answer. Returning it the moment it matched -- which is
+	 * what this did until #6 -- let it win before the other
+	 * architectures were even looked at, so an unstamped artifact
+	 * silently bypassed this whole check. Every push from a daemon
+	 * that does not send an architecture creates one of those, so the
+	 * hole was being widened by ordinary use.
 	 */
+	if (e == STORE_OK) {
+		hits = 1;
+		snprintf(hit_name, sizeof(hit_name), "%s", canonical);
+		memcpy(hit_digest, out_digest, STORE_SHA256_MAX);
+	} else if (e != STORE_ERR_NOT_FOUND) {
+		return e;
+	}
+
 	stem = strlen(canonical) - 7;
 	for (i = 0; g_arches[i] != NULL; i++) {
 		char found[STORE_SHA256_MAX];

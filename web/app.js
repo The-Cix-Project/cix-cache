@@ -457,6 +457,16 @@ function renderStatus() {
 	setText("m-unique", String(s.unique_packages));
 	setText("m-packages", String(s.packages));
 	setText("m-bytes", humanBytes(s.package_bytes));
+	/*
+	 * Only shown when there are any, and coloured. These serve fine
+	 * today and stop being safe the moment another machine's build
+	 * shares one of their names -- so this is the only place anyone
+	 * would find out before that happens.
+	 */
+	const un = el("m-unstamped");
+
+	un.hidden = !(s.unstamped > 0);
+	un.textContent = s.unstamped + " unstamped";
 
 	/* Status bar: what the server is doing. */
 	setText("s-requests", s.requests + " req");
