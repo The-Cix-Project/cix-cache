@@ -1,7 +1,13 @@
 # Artwork and type
 
 `cix-cache-logo.png` is the project's own artwork: the mark, and
-"ache" set in script.
+"ache" set in script. Nothing is generated from it any more -- it is
+kept as the original.
+
+`cix-tile.svg` is the mark as drawn vector art, and is the source for
+both the menu bar tile and the favicon. It is deliberately not traced
+from the raster: there the mark's lower right stroke runs into the cyan
+of "ache", so a colour separation cuts the stroke and clips the glyph.
 
 `cix-cache-wordmark.png` is the project name set in **Pacifico**, by
 Vernon Adams, Jacques Le Bailly and the Pacifico Project Authors,
