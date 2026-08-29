@@ -1032,7 +1032,7 @@ static const char *content_type_for(const char *path)
 	return "application/octet-stream";
 }
 
-static void serve_static(struct conn *cc, const char *req_path)
+static void serve_static(struct conn *cc, const char *req_path, int head_only)
 {
 	char path[PATH_MAX];
 	struct stat st;
@@ -1059,6 +1059,19 @@ static void serve_static(struct conn *cc, const char *req_path)
 		respond_error(cc, 404, "no such endpoint");
 		return;
 	}
+	/*
+	 * HEAD answers exactly as GET would, minus the body. Returning 404
+	 * to a HEAD on a file that GETs 200 makes a proxy or a health check
+	 * read the asset as missing, and costs nothing to get right: the
+	 * size and type are already known, so the body is never read.
+	 */
+	if (head_only) {
+		close(fd);
+		cc->head_only = 1;
+		begin_response(cc, 200, content_type_for(path), NULL, (long long)st.st_size);
+		return;
+	}
+
 	/*
 	 * Dashboard assets are read whole, unlike artifacts: they are tens
 	 * of KB and are the only thing in this server small enough that
@@ -1097,6 +1110,15 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 	char *q;
 
 	g_requests++;
+	/*
+	 * Per-request state, on a connection that is reused. Both are set
+	 * only by the paths that need them, so without a reset here a
+	 * keep-alive GET following a HEAD would inherit head_only and drop
+	 * its body, and a request would inherit the previous one's log
+	 * note and be recorded as something it was not.
+	 */
+	cc->head_only = 0;
+	cc->note[0] = '\0';
 	snprintf(path, sizeof(path), "%s", req->path);
 	q = strchr(path, '?');
 	if (q != NULL)
@@ -1210,8 +1232,8 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 		return;
 	}
 
-	if (is_get) {
-		serve_static(cc, path);
+	if (is_get || is_head) {
+		serve_static(cc, path, is_head);
 		return;
 	}
 	respond_error(cc, 404, "no such endpoint");

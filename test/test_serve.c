@@ -108,6 +108,29 @@ int main(void)
 	CHECK(ts_status(PORT, "POST", "/big-1.0.tar.gz", NULL) == 405, "unsupported method");
 
 	/*
+	 * HEAD on a dashboard asset has to answer as GET does. A 404 where
+	 * GET returns 200 reads, to a proxy or a health check, as the asset
+	 * having gone missing.
+	 */
+	CHECK(ts_status(PORT, "GET", "/style.css", NULL) == 200, "GET a dashboard asset");
+	CHECK(ts_status(PORT, "HEAD", "/style.css", NULL) == 200, "HEAD a dashboard asset");
+	CHECK(ts_status(PORT, "HEAD", "/nosuch.css", NULL) == 404, "HEAD a missing asset");
+
+	/*
+	 * And a GET must still carry its body after a HEAD earlier on the
+	 * SAME connection. head_only is connection state, so without a
+	 * per-request reset this second response comes back empty -- which
+	 * is a blank dashboard, not an error anyone would see in a status
+	 * code.
+	 */
+	snprintf(cmd, sizeof(cmd),
+	         "curl -s --http1.1 -I 'http://127.0.0.1:%d/style.css' -o /dev/null "
+	         "--next 'http://127.0.0.1:%d/app.js' -o /dev/null -w '%%{size_download}'",
+	         PORT, PORT);
+	CHECK(ts_capture(cmd, got, sizeof(got)) == 0 && atoi(got) > 0,
+	      "a GET after a HEAD on one connection still sends its body");
+
+	/*
 	 * A misconfigured registry 404s every request and every host
 	 * silently rebuilds from source, so hits and misses have to be
 	 * distinguishable from outside. Found live -- see
