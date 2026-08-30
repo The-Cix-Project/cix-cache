@@ -1214,11 +1214,15 @@ static void serve_static(struct conn *cc, const char *req_path, int head_only)
 
 /* ---- routing ---- */
 
-static int ends_with_targz(const char *s)
+/*
+ * True for a path naming an artifact rather than the dashboard or the
+ * API. Artifact suffixes are the only ones the store recognises, which
+ * is what keeps the machine-facing namespace from colliding with "/",
+ * "/index.html", "/api/v1/..." and "/MANIFEST.json".
+ */
+static int is_artifact_path(const char *s)
 {
-	size_t len = strlen(s);
-
-	return len > 7 && strcmp(s + len - 7, ".tar.gz") == 0;
+	return store_suffix_of(s) != NULL;
 }
 
 static void dispatch(struct conn *cc, const struct http_request *req)
@@ -1254,7 +1258,7 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 	 * machine-facing namespace and the operator-facing one cannot
 	 * collide however the store is filled.
 	 */
-	if (ends_with_targz(path)) {
+	if (is_artifact_path(path)) {
 		const char *name = path + 1;
 
 		/*

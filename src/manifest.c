@@ -21,8 +21,13 @@ static int emit_entry(const char *name, const char *digest, off_t size, time_t m
 	char key[STORE_NAME_MAX];
 
 	snprintf(file, sizeof(file), "%s/%s", STORE_DIR, name);
-	/* Keyed by name-version, without the .tar.gz suffix. */
-	snprintf(key, sizeof(key), "%.*s", (int)(strlen(name) - 7), name);
+	/* Keyed by the name without its suffix, whatever that suffix is. */
+	{
+		const char *ext = store_suffix_of(name);
+
+		snprintf(key, sizeof(key), "%.*s",
+		         (int)(strlen(name) - (ext != NULL ? strlen(ext) : 0)), name);
+	}
 	jw_key(w, key);
 	jw_obj_open(w);
 	jw_key(w, "file");

@@ -107,6 +107,20 @@ int store_init(const char *root);
 const char *store_root(void);
 
 /*
+ * The suffix a published name ends in, or NULL if it ends in none this
+ * store recognises.
+ *
+ * One table, because the alternative is the seven-character `.tar.gz`
+ * assumption spelled out at every site that needs a stem -- and adding
+ * a second suffix by hand is how the fourteenth site gets missed. The
+ * returned pointer is into that table, so it outlives the call.
+ *
+ * Matched longest-first, so a compound suffix wins over the shorter one
+ * it ends with.
+ */
+const char *store_suffix_of(const char *name);
+
+/*
  * Charset gate for a published filename. Deliberately validates the
  * WHOLE basename rather than splitting it into name and version:
  * "<name>-<version>" cannot be split unambiguously (libc-dev-2.36 and

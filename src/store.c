@@ -99,6 +99,35 @@ int store_digest_is_valid(const char *s)
 	return s[STORE_SHA256_HEX_LEN] == '\0';
 }
 
+/*
+ * Longest first: a compound suffix has to win over the shorter one it
+ * ends with, or ".iso.minisig" would be read as a ".minisig" whose stem
+ * still carries ".iso".
+ */
+static const char *const g_suffixes[] = { ".tar.gz", NULL };
+
+const char *store_suffix_of(const char *name)
+{
+	size_t len = strlen(name);
+	size_t i;
+
+	for (i = 0; g_suffixes[i] != NULL; i++) {
+		size_t slen = strlen(g_suffixes[i]);
+
+		if (len > slen && strcmp(name + len - slen, g_suffixes[i]) == 0)
+			return g_suffixes[i];
+	}
+	return NULL;
+}
+
+/* Length of the name without its suffix. */
+static size_t stem_len(const char *name)
+{
+	const char *suffix = store_suffix_of(name);
+
+	return suffix != NULL ? strlen(name) - strlen(suffix) : strlen(name);
+}
+
 int store_name_is_valid(const char *name)
 {
 	size_t len;
@@ -118,7 +147,7 @@ int store_name_is_valid(const char *name)
 		if (c == '.' && name[i + 1] == '.')
 			return 0;
 	}
-	if (len <= 7 || strcmp(name + len - 7, ".tar.gz") != 0)
+	if (store_suffix_of(name) == NULL)
 		return 0;
 	return 1;
 }
@@ -155,8 +184,7 @@ static size_t arch_offset(const char *name, size_t stem)
 
 const char *store_arch_of(const char *name, char *out, size_t out_size)
 {
-	size_t len = strlen(name);
-	size_t stem = len > 7 ? len - 7 : len;
+	size_t stem = stem_len(name);
 	size_t at = arch_offset(name, stem);
 
 	if (at == 0)
@@ -237,8 +265,8 @@ static int has_version(const char *name, size_t stem)
 
 int store_canonical_name(const char *name, char *out, size_t out_size)
 {
-	char suffix[64];
-	size_t len;
+	char suffix[80];
+	const char *ext;
 	size_t stem;
 	size_t rel;
 	size_t z;
@@ -246,8 +274,8 @@ int store_canonical_name(const char *name, char *out, size_t out_size)
 
 	if (!store_name_is_valid(name))
 		return -1;
-	len = strlen(name);
-	stem = len - 7; /* store_name_is_valid() guarantees the .tar.gz */
+	ext = store_suffix_of(name); /* store_name_is_valid() guarantees one */
+	stem = strlen(name) - strlen(ext);
 
 	/*
 	 * An architecture already in the name is carried through untouched,
@@ -259,10 +287,10 @@ int store_canonical_name(const char *name, char *out, size_t out_size)
 	 */
 	arch = arch_offset(name, stem);
 	if (arch != 0) {
-		snprintf(suffix, sizeof(suffix), "-%.*s.tar.gz", (int)(stem - arch), name + arch);
+		snprintf(suffix, sizeof(suffix), "-%.*s%s", (int)(stem - arch), name + arch, ext);
 		stem = arch - 1;
 	} else {
-		snprintf(suffix, sizeof(suffix), ".tar.gz");
+		snprintf(suffix, sizeof(suffix), "%s", ext);
 	}
 	rel = release_offset(name, stem);
 
@@ -299,8 +327,7 @@ void store_split_display(const char *name, char *out_name, size_t out_name_size,
                          size_t out_version_size, int *out_release, char *out_arch,
                          size_t out_arch_size)
 {
-	size_t len = strlen(name);
-	size_t stem = len > 7 ? len - 7 : len;
+	size_t stem = stem_len(name);
 	size_t rel;
 	size_t arch;
 	size_t i;
@@ -463,11 +490,12 @@ enum store_error store_resolve_as(const char *name, char *out_digest, size_t out
 		return e;
 	}
 
-	stem = strlen(canonical) - 7;
+	stem = stem_len(canonical);
 	for (i = 0; g_arches[i] != NULL; i++) {
 		char found[STORE_SHA256_MAX];
 
-		snprintf(probe, sizeof(probe), "%.*s-%s.tar.gz", (int)stem, canonical, g_arches[i]);
+		snprintf(probe, sizeof(probe), "%.*s-%s%s", (int)stem, canonical, g_arches[i],
+		         store_suffix_of(canonical));
 		if (raw_entry_path(probe, path, sizeof(path)) != 0)
 			continue;
 		if (resolve_path(path, found, sizeof(found)) != STORE_OK)
@@ -821,10 +849,10 @@ int store_set_arch(const char *arch, int dry_run, int *out_renamed, int *out_con
 
 	for (i = 0; i < set.count; i++) {
 		const char *name = set.slots + i * STORE_NAME_MAX;
-		size_t stem = strlen(name) - 7;
+		size_t stem = stem_len(name);
 
-		if ((size_t)snprintf(to_name, sizeof(to_name), "%.*s-%s.tar.gz", (int)stem, name,
-		                     arch) >= sizeof(to_name) ||
+		if ((size_t)snprintf(to_name, sizeof(to_name), "%.*s-%s%s", (int)stem, name, arch,
+		                     store_suffix_of(name)) >= sizeof(to_name) ||
 		    raw_entry_path(name, from, sizeof(from)) != 0 ||
 		    raw_entry_path(to_name, to, sizeof(to)) != 0) {
 			fprintf(stderr, "set-arch: %s: name too long\n", name);
