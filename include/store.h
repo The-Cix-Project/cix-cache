@@ -10,7 +10,7 @@
  * exact filenames a Cix host asks for.
  *
  *   <root>/blobs/<sha256>                    real bytes, mode 0444
- *   <root>/packages/<name>-<version>.tar.gz  -> ../blobs/<sha256>
+ *   <root>/packages/<name>-<ver>-<rel>-<arch>.tar.gz  -> ../blobs/<sha256>
  *   <root>/tmp/                              upload staging, same fs
  *
  * The published entries are symlinks, and that is the whole point: the

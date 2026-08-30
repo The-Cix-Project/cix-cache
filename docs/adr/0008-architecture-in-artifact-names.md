@@ -68,7 +68,8 @@ not send one creates another such entry, so ordinary use was widening
 the hole rather than leaving it fixed in size.
 
 This is what makes the migration free. Every recipe in git today derives
-a bare URL, and 125 artifacts answer to one. Refusing those outright
+a bare URL, and — counted on the running store on 2026-08-29 — 125
+artifacts answer to one. Refusing those outright
 would make every host silently rebuild from source — the invisible
 failure of ADR-0005, at scale. Aliasing them to "the only architecture
 present" keeps them working, and the alias evaporates by itself at

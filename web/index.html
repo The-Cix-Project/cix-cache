@@ -122,6 +122,7 @@
 		<div class="help-title">Reference</div>
 		<a href="#help-start">Getting started</a>
 		<a href="#help-names">Artifact names</a>
+		<a href="#help-listing">Reading the list</a>
 		<a href="#help-fetch">Fetching artifacts</a>
 		<a href="#help-publish">Publishing</a>
 		<a href="#help-api">Operator API</a>
@@ -191,11 +192,30 @@ cixctl --host=&lt;box&gt; pkg sync</code></pre>
 			recipes are updated.
 		</p>
 
+		<h2 id="help-listing">Reading the list</h2>
+		<p>
+			Results come back <strong>most recently published first</strong>, so the list
+			answers &ldquo;what landed&rdquo;. Finding a known name is the search box's job.
+		</p>
+		<p>
+			Click a column heading to sort by it. Text opens A&ndash;Z; size, release and date
+			open largest or newest first, because that is usually why you clicked. The choice
+			is remembered. Versions sort by rule rather than as strings, so
+			<code>2.1.10</code> follows <code>2.1.8</code> and <code>v2.2.0-rc6</code> comes
+			<em>before</em> <code>v2.2.0</code>.
+		</p>
+		<p class="note">
+			Two columns appear only when they tell rows apart: <code>Arch</code>, and the
+			architecture chips under the search box. While the store holds one architecture
+			there is nothing to choose between, and a filter with a single option filters
+			nothing.
+		</p>
+
 		<h2 id="help-fetch">Fetching artifacts</h2>
 		<p>Every artifact lives at the root of the base URL. There is no other path shape.</p>
 		<table class="help-table">
-			<tr><td><span class="tag">GET</span></td><td><code>/&lt;name&gt;-&lt;version&gt;.tar.gz</code></td><td>the artifact</td></tr>
-			<tr><td><span class="tag">HEAD</span></td><td><code>/&lt;name&gt;-&lt;version&gt;.tar.gz</code></td><td>size and digest, no body</td></tr>
+			<tr><td><span class="tag">GET</span></td><td><code>/&lt;name&gt;-&lt;version&gt;-&lt;release&gt;-&lt;arch&gt;.tar.gz</code></td><td>the artifact</td></tr>
+			<tr><td><span class="tag">HEAD</span></td><td><code>/&lt;name&gt;-&lt;version&gt;-&lt;release&gt;-&lt;arch&gt;.tar.gz</code></td><td>size and digest, no body</td></tr>
 		</table>
 		<pre><code>curl -fsSL http://&lt;host&gt;:8080/bc-1.08.1-2.tar.gz | sha256sum
 # equals the recipe's pkg_artifact_sha256</code></pre>
@@ -207,8 +227,9 @@ cixctl --host=&lt;box&gt; pkg sync</code></pre>
 
 		<h2 id="help-publish">Publishing</h2>
 		<p>
-			A push declares its digest up front. The body streams to disk, is hashed there,
-			and is only then adopted and published.
+			A push declares its digest up front. The body streams to disk and is hashed
+			there; the name is then checked, and only a push that will be accepted is
+			adopted into the store. A refused one leaves nothing behind.
 		</p>
 		<pre><code>curl -X PUT -T bash-5.2.37-2.tar.gz \
   -H "Authorization: Bearer $TOKEN" \
@@ -218,7 +239,7 @@ cixctl --host=&lt;box&gt; pkg sync</code></pre>
 			<tr><td><span class="tag ok">201</span></td><td colspan="2">published</td></tr>
 			<tr><td><span class="tag warn">400</span></td><td colspan="2">body does not match the declared sha256, or the name is malformed</td></tr>
 			<tr><td><span class="tag warn">401</span></td><td colspan="2">missing or wrong token &mdash; push always needs one</td></tr>
-			<tr><td><span class="tag warn">409</span></td><td colspan="2">that name already exists with <em>different</em> bytes</td></tr>
+			<tr><td><span class="tag warn">409</span></td><td colspan="2">that name already exists with <em>different</em> bytes, or it matches artifacts for more than one architecture</td></tr>
 			<tr><td><span class="tag warn">411</span></td><td colspan="2">no <code>Content-Length</code></td></tr>
 		</table>
 		<p>
@@ -267,7 +288,7 @@ cixctl --host=&lt;box&gt; pkg sync</code></pre>
 		<h2 id="help-store">How the store works</h2>
 		<pre><code>cache/
   blobs/&lt;sha256&gt;                    the bytes, mode 0444
-  packages/&lt;name&gt;-&lt;version&gt;.tar.gz  -&gt; ../blobs/&lt;sha256&gt;
+  packages/&lt;name&gt;-&lt;ver&gt;-&lt;rel&gt;-&lt;arch&gt;.tar.gz  -&gt; ../blobs/&lt;sha256&gt;
   tmp/                              upload staging</code></pre>
 		<p>
 			Published names are symlinks, and the link target <em>is</em> the digest. So a

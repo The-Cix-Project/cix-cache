@@ -172,7 +172,14 @@ cixcachectl put FILE --name=N --sha256=H --token=<t>
 ```
 
 `ls` shows artifact, version and release in separate columns; the
-release is Cix's number, not upstream's.
+release is Cix's number, not upstream's. It lists newest-published
+first, and grows an architecture column only once two artifacts differ
+by one. `status` grows an `unstamped` line only when there is something
+to stamp.
+
+`HEAD` works on artifacts — it returns the size and `X-Cix-Sha256`
+without re-reading the file, which is how to check what is already
+published before pushing over it — and on dashboard assets.
 
 `rm` unpublishes a name; the blob survives until collected. A push whose
 body does not match its declared `X-Cix-Sha256` is refused with 400, and

@@ -6,6 +6,13 @@ Accepted
 
 ## Context
 
+> The image figures below are historical: ADR-0006 later removed the
+> image tier, so the largest artifact today is a few hundred MB rather
+> than 2.7 GB. The sizing argument is unchanged — streaming still costs
+> a fixed buffer per connection regardless of artifact size — and the
+> figures are left as the evidence the decision was actually made on.
+
+
 The obvious move was to reuse the Cix daemon's HTTP layer wholesale. Read
 directly, it turns out to encode decisions made for the opposite workload:
 

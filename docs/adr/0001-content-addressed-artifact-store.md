@@ -8,6 +8,12 @@ are unchanged.
 
 ## Context
 
+> Image-tier figures below are historical; ADR-0006 removed that tier.
+> They are left as the evidence this decision was made on rather than
+> restated with current numbers, which would make the reasoning read as
+> though it were reached from facts that did not exist at the time.
+
+
 This repository began as a hand-built static export: 5 whole-image rootfs
 tarballs and 66 package tarballs pulled off a live host (192.168.15.95),
 served by `python3 -m http.server`, with a hand-written `MANIFEST.json`

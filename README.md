@@ -14,7 +14,7 @@ build/cixcached --root=cache --bind=0.0.0.0 --port=8080
 
 | Purpose | Request |
 |---|---|
-| artifact | `GET <base>/<name>-<version>.tar.gz` |
+| artifact | `GET <base>/<name>-<version>-<release>-<arch>.tar.gz` |
 | publish | `PUT`, with `X-Cix-Sha256` |
 | existence probe | `HEAD` |
 | auth | `Authorization: Bearer <token>` |
@@ -29,8 +29,11 @@ observability, and `/MANIFEST.json` is generated from the tree on request.
 The store holds several revisions of most packages, so a count of
 packages and a count of published artifacts are different facts and both
 are reported.
-Artifact paths are the only ones ending `.tar.gz`, so the two namespaces
-cannot collide.
+Artifact paths are the only ones ending in a suffix the store
+recognises, which today means `.tar.gz` and nothing else, so the two
+namespaces cannot collide. The suffixes live in one table
+(`store_suffix_of()`) rather than being spelled out at each site that
+needs to strip one.
 
 ## Artifact names
 
@@ -62,6 +65,21 @@ falling back to a source build. Alias hits are logged and counted, since
 a thing that works is otherwise invisible. See
 `docs/adr/0007-canonical-artifact-names.md`.
 
+## Reading a listing
+
+Listings come back **most recently published first**, so the front page
+answers "what landed". Columns are sortable when you want a different
+question answered — by name to scan for something, by size to find what
+is taking up the room.
+
+`MANIFEST.json` is ordered by name instead, because it is a document
+meant to be compared against another copy of itself; ordered by time it
+would diff as noise.
+
+Versions compare by rule rather than by string, so `2.1.10` follows
+`2.1.8` and a prerelease comes *before* its release. The rules, and
+their limits, are in `docs/adr/0009-ordering.md`.
+
 ## The invariant
 
 The registry is **never a trust boundary**, and it is a **cache, never a
@@ -85,7 +103,7 @@ binaries they validate. See `docs/adr/0002-registry-is-a-cache-not-a-catalogue.m
 ```
 cache/
   blobs/<sha256>                    the bytes, mode 0444
-  packages/<name>-<version>.tar.gz  -> ../blobs/<sha256>
+  packages/<name>-<ver>-<rel>-<arch>.tar.gz  -> ../blobs/<sha256>
   tmp/                              upload staging
 ```
 
@@ -118,5 +136,7 @@ codes, CLI commands and how the store works.
 
 - `docs/DESIGN.md` — the original design brief and its reasoning
 - `docs/DEPLOYMENT.md` — running it, and pointing hosts at it
-- `docs/adr/` — why the store, the reactor and the push protocol are shaped
-  the way they are
+- `docs/adr/` — one decision per file, with an index in
+  `docs/adr/README.md`. Their figures are dated observations rather than
+  current facts: an ADR records the evidence a decision was made on, so
+  the numbers are left alone and date-stamped rather than refreshed.

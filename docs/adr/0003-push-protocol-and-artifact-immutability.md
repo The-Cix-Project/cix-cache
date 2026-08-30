@@ -105,6 +105,27 @@ Hashing a 2.7 GB upload takes on the order of ten seconds, far too long to
 block a single-threaded reactor, so the child is watched as a `pidfd`
 registered in epoll rather than waited on. See ADR-0004.
 
+### A refused push is refused before its body is adopted
+
+Amended 2026-08-30 (#7). The conflict was originally discovered at
+publish time, after the body had been hashed and adopted into `blobs/`
+— so a refusal left the rejected artifact on disk with nothing pointing
+at it until a collection.
+
+The name is now resolved between hashing and adopting: if it is taken
+by different bytes the temp file is unlinked and nothing reaches
+`blobs/`. `store_publish()` still makes the authoritative decision;
+this only settles whether the body becomes a blob or is discarded.
+
+Worth recording what the fix did *not* turn out to be. The cost was one
+wasted copy per **distinct** refused artifact, not one per attempt:
+adopting is content-addressed, so a retry of the same rejected bytes
+deduplicates onto the orphan already there. A first regression test
+passed against the buggy code for exactly that reason.
+
+An ambiguous name (ADR-0008) is likewise a refusal and not a fault, and
+returns 409 rather than the 500 it originally produced.
+
 ## Consequences
 
 - A builder can `HEAD` before uploading and skip pushing hundreds of MB it
