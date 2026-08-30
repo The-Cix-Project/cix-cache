@@ -158,6 +158,20 @@ That is the intended behaviour, not a regression: a content checksum
 cannot tell an aarch64 binary from an x86_64 one, so a name that could
 mean either must mean neither.
 
+## Publishing an installer ISO
+
+Signature first, then the ISO — an unsigned bootable is refused, and
+the refusal lands before the body is uploaded:
+
+```
+minisign -Sm cix-installer-2.2.0-1-x86_64.iso        # produces .iso.minisig
+cixcachectl put cix-installer-2.2.0-1-x86_64.iso.minisig --token=<t> ...
+cixcachectl put cix-installer-2.2.0-1-x86_64.iso     --token=<t> ...
+```
+
+Consumers verify with the pinned public key, on a trusted machine,
+**before** writing the stick. The key does not come from this server.
+
 ## Operating
 
 ```

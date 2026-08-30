@@ -15,6 +15,7 @@ build/cixcached --root=cache --bind=0.0.0.0 --port=8080
 | Purpose | Request |
 |---|---|
 | artifact | `GET <base>/<name>-<version>-<release>-<arch>.tar.gz` |
+| installer | `GET <base>/<name>-<version>-<release>-<arch>.iso` (+ `.iso.minisig`) |
 | publish | `PUT`, with `X-Cix-Sha256` |
 | existence probe | `HEAD` |
 | auth | `Authorization: Bearer <token>` |
@@ -64,6 +65,21 @@ the standard keep working while they are updated, rather than silently
 falling back to a source build. Alias hits are logged and counted, since
 a thing that works is otherwise invisible. See
 `docs/adr/0007-canonical-artifact-names.md`.
+
+## Installer ISOs
+
+A bootable ISO is served too, with a detached minisign signature beside
+it (`…-x86_64.iso` and `…-x86_64.iso.minisig`). That is not the image
+tier coming back: an image can be composed by a running host, which is
+why ADR-0006 removed it, and an ISO is what you boot to *create* a
+host — there is nothing on the far side to compose anything.
+
+An unsigned ISO is refused, because an ISO is fetched by a person and
+booted with no recipe checksum vouching for it. **Verify before writing
+the stick, on a machine you already trust** — the signature must be
+checked by something other than the thing being checked, and an
+installer validating itself proves nothing. See
+`docs/adr/0010-installer-isos-are-served-and-signed.md`.
 
 ## Reading a listing
 

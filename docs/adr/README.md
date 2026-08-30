@@ -18,6 +18,7 @@ reasoning incoherent.
 | [0007](0007-canonical-artifact-names.md) | Canonical names `name-version-release`, and aliasing the old ones | accepted; architecture section superseded by 0008 |
 | [0008](0008-architecture-in-artifact-names.md) | Architecture is part of an artifact's identity | accepted; supersedes 0007's architecture section |
 | [0009](0009-ordering.md) | How listings, manifests and versions are ordered | accepted |
+| [0010](0010-installer-isos-are-served-and-signed.md) | Installer ISOs are served, and signed | accepted; refines 0006 |
 
-Proposed, not yet decided: serving installer ISOs with detached
-signatures — see issue #8, whose body carries the settled design.
+Nothing is currently undecided. Work in flight is tracked in the issue
+tracker rather than here.

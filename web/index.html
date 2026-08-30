@@ -126,6 +126,7 @@
 		<a href="#help-listing">Reading the list</a>
 		<a href="#help-fetch">Fetching artifacts</a>
 		<a href="#help-publish">Publishing</a>
+		<a href="#help-isos">Installer ISOs</a>
 		<a href="#help-api">Operator API</a>
 		<a href="#help-cli">Command line</a>
 		<a href="#help-store">How the store works</a>
@@ -255,9 +256,27 @@ cixctl --host=&lt;box&gt; pkg sync</code></pre>
 			collected, because another name may share them.
 		</p>
 
+		<h2 id="help-isos">Installer ISOs</h2>
+		<p>
+			A bootable ISO is served with a detached
+			<a href="https://jedisct1.github.io/minisign/">minisign</a> signature beside it:
+			<code>&lt;name&gt;-&lt;version&gt;-&lt;release&gt;-&lt;arch&gt;.iso</code> and the same
+			name with <code>.iso.minisig</code>. An ISO with no signature published is refused
+			with <span class="tag warn">409</span> &mdash; publish the signature first.
+		</p>
+		<pre><code>curl -fsSLO http://&lt;host&gt;:8080/cix-installer-2.2.0-1-x86_64.iso
+curl -fsSLO http://&lt;host&gt;:8080/cix-installer-2.2.0-1-x86_64.iso.minisig
+minisign -Vm cix-installer-2.2.0-1-x86_64.iso -p cix.pub</code></pre>
+		<p class="note">
+			<strong>Verify before writing the stick, on a machine you already trust.</strong>
+			An installer that checks its own signature is the code being checked doing the
+			checking &mdash; a substituted ISO reports success. The public key does not come
+			from this server; if it did, it would be vouching for its own payload.
+		</p>
+
 		<h2 id="help-api">Operator API</h2>
 		<table class="help-table">
-			<tr><td><span class="tag">GET</span></td><td><code>/MANIFEST.json</code></td><td>generated from the tree, never stored</td></tr>
+			<tr><td><span class="tag">GET</span></td><td><code>/MANIFEST.json</code></td><td>generated from the tree, never stored; <code>packages</code> and <code>installers</code> are separate sections</td></tr>
 			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/status</code></td><td>counts, uptime, hit/miss, config summary</td></tr>
 			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/artifacts</code></td><td>everything published, with <code>artifact</code>, <code>version</code> and <code>release</code> split out</td></tr>
 			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/log?after=&lt;seq&gt;</code></td><td>activity since a sequence number</td></tr>
