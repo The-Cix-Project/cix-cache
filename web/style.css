@@ -940,3 +940,12 @@ th.sortable[aria-sort="descending"]::after {
 	color: var(--warn);
 	font-weight: 600;
 }
+
+/* Same rule as .arch-col: a column of blanks teaches nothing. */
+.signed-col {
+	display: none;
+}
+
+.show-signed .signed-col {
+	display: table-cell;
+}

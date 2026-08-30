@@ -595,6 +595,67 @@ static void test_version_cmp(void)
 	CHECK(store_version_cmp("", "1.0") < 0, "an absent version is older than any version");
 }
 
+/*
+ * Bootables and their signatures (#8).
+ *
+ * The signature shares its artifact's stem, so release and
+ * architecture parse identically on both and canonicalising either
+ * produces the other's counterpart. That is what lets one be found
+ * from the other with no index.
+ */
+static void test_signatures(void)
+{
+	char out[STORE_NAME_MAX];
+	char name[STORE_NAME_MAX];
+	char version[STORE_NAME_MAX];
+	char arch[64];
+	int release = -1;
+
+	CHECK(store_suffix_of("a-1.0-1-x86_64.iso") != NULL &&
+	              strcmp(store_suffix_of("a-1.0-1-x86_64.iso"), ".iso") == 0,
+	      "an .iso is a recognised artifact");
+	/* Longest-first matters: this must not be read as a bare suffix. */
+	CHECK(store_suffix_of("a-1.0-1-x86_64.iso.minisig") != NULL &&
+	              strcmp(store_suffix_of("a-1.0-1-x86_64.iso.minisig"), STORE_SIG_SUFFIX) == 0,
+	      "a compound signature suffix wins over the shorter one it ends with");
+
+	CHECK(store_is_signature("a-1.0-1-x86_64.iso.minisig"), "a .minisig is a signature");
+	CHECK(!store_is_signature("a-1.0-1-x86_64.iso"), "an .iso is not");
+	CHECK(!store_is_signature("a-1.0-1-x86_64.tar.gz"), "nor is a package");
+
+	CHECK(store_needs_signature("a-1.0-1-x86_64.iso"), "a bootable must be signed");
+	CHECK(!store_needs_signature("a-1.0-1-x86_64.tar.gz"),
+	      "a package is approved by its recipe instead");
+	CHECK(!store_needs_signature("a-1.0-1-x86_64.iso.minisig"),
+	      "and a signature does not itself need one");
+
+	CHECK(store_signature_name("a-1.0-1-x86_64.iso", out, sizeof(out)) == 0 &&
+	              strcmp(out, "a-1.0-1-x86_64.iso.minisig") == 0,
+	      "the signature name is derived from the artifact");
+	CHECK(store_signature_name("a-1.0-1-x86_64.tar.gz", out, sizeof(out)) != 0,
+	      "a package has no signature name");
+
+	/* The stem parses the same either side of the suffix. */
+	store_split_display("cix-installer-2.2.0-1-x86_64.iso", name, sizeof(name), version,
+	                    sizeof(version), &release, arch, sizeof(arch));
+	CHECK(strcmp(name, "cix-installer") == 0 && strcmp(version, "2.2.0") == 0 && release == 1 &&
+	              strcmp(arch, "x86_64") == 0,
+	      "an installer name splits like any other");
+	store_split_display("cix-installer-2.2.0-1-x86_64.iso.minisig", name, sizeof(name), version,
+	                    sizeof(version), &release, arch, sizeof(arch));
+	CHECK(strcmp(name, "cix-installer") == 0 && strcmp(version, "2.2.0") == 0 && release == 1 &&
+	              strcmp(arch, "x86_64") == 0,
+	      "and so does its signature");
+
+	/* Canonicalising either produces the other's counterpart. */
+	CHECK(store_canonical_name("cix-installer-2.2.0-x86_64.iso", out, sizeof(out)) == 1 &&
+	              strcmp(out, "cix-installer-2.2.0-1-x86_64.iso") == 0,
+	      "an ISO gets its release behind the architecture");
+	CHECK(store_canonical_name("cix-installer-2.2.0-x86_64.iso.minisig", out, sizeof(out)) == 1 &&
+	              strcmp(out, "cix-installer-2.2.0-1-x86_64.iso.minisig") == 0,
+	      "and so does its signature, to the matching name");
+}
+
 int main(void)
 {
 	char root[] = "/tmp/cixcache-test-store-XXXXXX";
@@ -621,6 +682,7 @@ int main(void)
 	test_canonicalize_migration(root);
 	test_list_order(root);
 	test_arch(root);
+	test_signatures();
 
 	if (g_failures == 0)
 		printf("test_store: ok\n");

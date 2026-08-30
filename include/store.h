@@ -121,6 +121,37 @@ const char *store_root(void);
 const char *store_suffix_of(const char *name);
 
 /*
+ * A detached signature is a sibling object sharing its artifact's stem
+ * -- cix-installer-2.2.0-1-x86_64.iso and .iso.minisig differ only in
+ * suffix, so release and architecture parse identically on both, and
+ * canonicalising either produces the other's counterpart.
+ *
+ * A sibling and not metadata because the store has no metadata: every
+ * name is a symlink to a blob and there is no index to keep in step.
+ * A signature that is just another blob with a name cannot drift out
+ * of sync with anything, and the verifier -- which is a standalone
+ * tool on a laptop that has just downloaded a file -- gets it with one
+ * GET rather than by parsing JSON.
+ */
+#define STORE_SIG_SUFFIX ".iso.minisig"
+
+/* True for a signature object rather than something to install or boot. */
+int store_is_signature(const char *name);
+
+/*
+ * True for an artifact that may not be published unsigned. Bootables
+ * only: a package is approved by a checksum in its recipe, an ISO is
+ * booted by a person with nothing else vouching for it.
+ */
+int store_needs_signature(const char *name);
+
+/*
+ * Builds the signature name for an artifact. Returns 0, or -1 if the
+ * artifact is not one that carries a signature.
+ */
+int store_signature_name(const char *name, char *out, size_t out_size);
+
+/*
  * Charset gate for a published filename. Deliberately validates the
  * WHOLE basename rather than splitting it into name and version:
  * "<name>-<version>" cannot be split unambiguously (libc-dev-2.36 and

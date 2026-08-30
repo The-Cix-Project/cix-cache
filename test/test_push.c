@@ -146,6 +146,57 @@ int main(void)
 	}
 
 	/* DELETE unpublishes the name; the blob stays for the collector. */
+	/*
+	 * A bootable may not be published unsigned, and the refusal lands
+	 * at header time -- before any of the body is staged, so refusing
+	 * costs a header exchange rather than a multi-gigabyte upload.
+	 */
+	CHECK(put(&ts, a_path, "inst-1.0-1-x86_64.iso", a_digest, TOKEN) == 409,
+	      "an ISO with no signature is refused");
+	CHECK(ts_status(PORT, "GET", "/inst-1.0-1-x86_64.iso", NULL) == 404,
+	      "and nothing was stored");
+	CHECK(put(&ts, b_path, "inst-1.0-1-x86_64.iso.minisig", b_digest, TOKEN) == 201,
+	      "the signature publishes on its own");
+	CHECK(put(&ts, a_path, "inst-1.0-1-x86_64.iso", a_digest, TOKEN) == 201,
+	      "and then the ISO is accepted");
+
+	/*
+	 * The signature is a sibling object, not a row: one artifact, and
+	 * its blob must survive collection. store_gc() builds its live set
+	 * from store_walk(), so filtering signatures there rather than in
+	 * the listing would free every one of them.
+	 */
+	{
+		char body[4096];
+		char cmd[512];
+		char before[64];
+		char after[64];
+
+		snprintf(cmd, sizeof(cmd), "ls '%s/blobs' | wc -l", ts.root);
+		CHECK(ts_capture(cmd, before, sizeof(before)) == 0, "count blobs before gc");
+		snprintf(cmd, sizeof(cmd),
+		         "curl -sS -X POST -H 'Authorization: Bearer %s' "
+		         "'http://127.0.0.1:%d/api/v1/gc' >/dev/null; ls '%s/blobs' | wc -l",
+		         TOKEN, PORT, ts.root);
+		CHECK(ts_capture(cmd, after, sizeof(after)) == 0, "count blobs after gc");
+		CHECK(strcmp(before, after) == 0, "collection does not free a signature's blob");
+		CHECK(ts_status(PORT, "GET", "/inst-1.0-1-x86_64.iso.minisig", NULL) == 200,
+		      "and the signature is still served afterwards");
+
+		snprintf(cmd, sizeof(cmd),
+		         "curl -sSI 'http://127.0.0.1:%d/inst-1.0-1-x86_64.iso' "
+		         "| grep -i '^content-type' | tr -d '\\r'",
+		         PORT);
+		CHECK(ts_capture(cmd, body, sizeof(body)) == 0 && strstr(body, "iso9660") != NULL,
+		      "an ISO is typed as an ISO");
+		snprintf(cmd, sizeof(cmd),
+		         "curl -sSI 'http://127.0.0.1:%d/p-1.0.tar.gz' "
+		         "| grep -i '^content-type' | tr -d '\\r'",
+		         PORT);
+		CHECK(ts_capture(cmd, body, sizeof(body)) == 0 && strstr(body, "gzip") != NULL,
+		      "and a package is still typed as an archive");
+	}
+
 	CHECK(ts_status(PORT, "DELETE", "/p-1.0.tar.gz", NULL) == 401, "delete needs a token");
 	CHECK(ts_status(PORT, "DELETE", "/p-1.0.tar.gz", TOKEN) == 204, "delete unpublishes");
 	CHECK(ts_status(PORT, "GET", "/p-1.0.tar.gz", NULL) == 404, "deleted name is gone");

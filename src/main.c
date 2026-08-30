@@ -402,6 +402,28 @@ static int bearer_ok(const struct http_request *req, const char *expect)
 
 /* ---- artifact serving ---- */
 
+/*
+ * Artifacts are typed from the store's suffix table, not from the last
+ * dot in the name. content_type_for() below keys off the last dot,
+ * which is right for a dashboard asset and wrong here: the last dot in
+ * ".tar.gz" is ".gz", and in ".iso.minisig" it is ".minisig" -- so a
+ * package would come back as something other than an archive.
+ */
+static const char *artifact_content_type(const char *name)
+{
+	const char *ext = store_suffix_of(name);
+
+	if (ext == NULL)
+		return "application/octet-stream";
+	if (strcmp(ext, ".tar.gz") == 0)
+		return "application/gzip";
+	if (strcmp(ext, ".iso") == 0)
+		return "application/x-iso9660-image";
+	if (strcmp(ext, STORE_SIG_SUFFIX) == 0)
+		return "text/plain; charset=utf-8";
+	return "application/octet-stream";
+}
+
 static void serve_artifact(struct conn *cc, const struct http_request *req, const char *name,
                            int head_only)
 {
@@ -478,13 +500,13 @@ static void serve_artifact(struct conn *cc, const struct http_request *req, cons
 	cc->head_only = head_only;
 	if (head_only) {
 		close(fd);
-		begin_response(cc, 200, "application/gzip", extra, (long long)size);
+		begin_response(cc, 200, artifact_content_type(served), extra, (long long)size);
 		return;
 	}
 	cc->blob_fd = fd;
 	cc->body_off = 0;
 	cc->body_len = size;
-	begin_response(cc, 200, "application/gzip", extra, (long long)size);
+	begin_response(cc, 200, artifact_content_type(served), extra, (long long)size);
 }
 
 /* ---- push ---- */
@@ -700,6 +722,34 @@ static void begin_upload(struct conn *cc, const struct http_request *req, const 
 		respond_error(cc, 400, "X-Cix-Sha256 header required, 64 lowercase hex");
 		return;
 	}
+	/*
+	 * A bootable may not be published unsigned. Checked here, before
+	 * any of the body is staged, so refusing costs the pusher a header
+	 * exchange rather than uploading a multi-gigabyte ISO to be told
+	 * no at the end.
+	 *
+	 * The signature has to exist first, which is the only order that
+	 * satisfies the rule: it is made over the ISO's digest and can be
+	 * produced before either is uploaded. Note this is a rule about
+	 * ACCEPTING, not about maintaining -- the store declines to take
+	 * an unsigned bootable, but does not promise one stays signed, so
+	 * it stays consistent with deletes being uncoupled.
+	 */
+	if (store_needs_signature(name)) {
+		char sig[STORE_NAME_MAX];
+		char found[STORE_SHA256_MAX];
+
+		if (store_signature_name(name, sig, sizeof(sig)) != 0 ||
+		    store_resolve(sig, found, sizeof(found)) != STORE_OK) {
+			char msg[STORE_NAME_MAX + 64];
+
+			snprintf(msg, sizeof(msg), "publish %s first -- an ISO may not be unsigned", sig);
+			server_log("warn", "push %s refused: no signature published", name);
+			respond_error(cc, 409, msg);
+			return;
+		}
+	}
+
 	snprintf(cc->up_digest, sizeof(cc->up_digest), "%s", digest);
 	snprintf(cc->up_name, sizeof(cc->up_name), "%s", name);
 	cc->up_expect = req->content_length;
@@ -811,6 +861,21 @@ static int list_entry(const char *name, const char *digest, off_t size, time_t m
 	 * alone. A name carrying no release reports 1, which is what it
 	 * means.
 	 */
+	/*
+	 * A signature is not a row. It is a sibling object on disk and
+	 * fetchable by GET, but an ISO and its signature are one artifact
+	 * to anybody reading a list -- two rows would double the count and
+	 * teach nothing.
+	 *
+	 * Filtered HERE and never in store_walk(): store_gc() builds its
+	 * live set from that walk, so a walk that skipped signatures would
+	 * leave their blobs unreferenced and the next collection would
+	 * delete every one of them. The walk reports the store as it is;
+	 * presentation decides what to show.
+	 */
+	if (store_is_signature(name))
+		return 0;
+
 	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version), &release,
 	                    arch, sizeof(arch));
 	jw_obj_open(lc->w);
@@ -838,6 +903,18 @@ static int list_entry(const char *name, const char *digest, off_t size, time_t m
 	 */
 	jw_key(lc->w, "version_rank");
 	jw_int(lc->w, lc->version_rank);
+	/*
+	 * Only for artifacts that carry one, so a package is not implicitly
+	 * described as unsigned when signing is not a thing it does.
+	 */
+	if (store_needs_signature(name)) {
+		char sig[STORE_NAME_MAX];
+		char found[STORE_SHA256_MAX];
+
+		jw_key(lc->w, "signed");
+		jw_bool(lc->w, store_signature_name(name, sig, sizeof(sig)) == 0 &&
+		                       store_resolve(sig, found, sizeof(found)) == STORE_OK);
+	}
 	jw_key(lc->w, "sha256");
 	jw_str(lc->w, digest);
 	jw_key(lc->w, "bytes");
@@ -861,6 +938,15 @@ static int count_entry(const char *name, const char *digest, off_t size, time_t 
 	(void)mtime;
 	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version), NULL, NULL,
 	                    0);
+	/*
+	 * Its bytes are real and stay in the size, but it is not an
+	 * artifact anybody installs, so it is not one of "138 artifacts".
+	 */
+	if (store_is_signature(name)) {
+		if (size > 0)
+			lc->bytes += (long long)size;
+		return 0;
+	}
 	if (store_arch_of(name, NULL, 0) == NULL)
 		lc->unstamped++;
 	remember_name(lc, short_name);

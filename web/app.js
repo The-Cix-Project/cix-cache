@@ -220,6 +220,18 @@ function resultRow(a) {
 	archCell.textContent = a.arch || "-";
 	row.appendChild(archCell);
 
+	/*
+	 * Only bootables carry one, so a package shows nothing rather than
+	 * being described as unsigned -- signing is not a thing it does.
+	 */
+	const signedCell = document.createElement("td");
+
+	signedCell.className = "num rel signed-col";
+	signedCell.textContent = a.signed === undefined ? "" : (a.signed ? "yes" : "no");
+	if (a.signed === false)
+		signedCell.style.color = "var(--error)";
+	row.appendChild(signedCell);
+
 	const sizeCell = document.createElement("td");
 	sizeCell.className = "num";
 	sizeCell.textContent = a.bytes < 0 ? "dangling" : humanBytes(a.bytes);
@@ -267,6 +279,7 @@ function resultRow(a) {
 const SORT_DIR_FIRST = {
 	artifact: 1,
 	arch: 1,
+	signed: 1,
 	version: -1,
 	release: -1,
 	bytes: -1,
@@ -321,6 +334,11 @@ function sortCmp(a, b) {
 		r = a.version_rank - b.version_rank;
 	} else if (k === "arch") {
 		r = (a.arch || "").localeCompare(b.arch || "");
+	} else if (k === "signed") {
+		/* undefined last: those are artifacts the question does not apply to. */
+		const rank = (v) => (v === undefined ? 2 : v ? 1 : 0);
+
+		r = rank(a.signed) - rank(b.signed);
 	} else {
 		r = a.artifact.localeCompare(b.artifact, undefined, { numeric: true });
 	}
@@ -406,6 +424,19 @@ function renderResults() {
 			}
 		}
 		el("results").classList.toggle("show-arch", distinct > 1);
+
+		/*
+		 * Same rule again: the column appears only once something in
+		 * view actually carries a signature. While the store holds
+		 * only packages it is a column of blanks.
+		 */
+		let signable = 0;
+
+		for (i = 0; i < shown.length; i++) {
+			if (shown[i].signed !== undefined)
+				signable++;
+		}
+		el("results").classList.toggle("show-signed", signable > 0);
 	}
 
 	const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
@@ -418,7 +449,7 @@ function renderResults() {
 		const row = document.createElement("tr");
 		const cell = document.createElement("td");
 
-		cell.colSpan = 7;
+		cell.colSpan = 8;
 		cell.className = "empty";
 		/*
 		 * Name the architecture too. Otherwise a filter left on reads

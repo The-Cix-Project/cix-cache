@@ -104,7 +104,7 @@ int store_digest_is_valid(const char *s)
  * ends with, or ".iso.minisig" would be read as a ".minisig" whose stem
  * still carries ".iso".
  */
-static const char *const g_suffixes[] = { ".tar.gz", NULL };
+static const char *const g_suffixes[] = { STORE_SIG_SUFFIX, ".tar.gz", ".iso", NULL };
 
 const char *store_suffix_of(const char *name)
 {
@@ -118,6 +118,29 @@ const char *store_suffix_of(const char *name)
 			return g_suffixes[i];
 	}
 	return NULL;
+}
+
+int store_is_signature(const char *name)
+{
+	const char *ext = store_suffix_of(name);
+
+	return ext != NULL && strcmp(ext, STORE_SIG_SUFFIX) == 0;
+}
+
+int store_needs_signature(const char *name)
+{
+	const char *ext = store_suffix_of(name);
+
+	return ext != NULL && strcmp(ext, ".iso") == 0;
+}
+
+int store_signature_name(const char *name, char *out, size_t out_size)
+{
+	if (!store_needs_signature(name))
+		return -1;
+	if ((size_t)snprintf(out, out_size, "%s.minisig", name) >= out_size)
+		return -1;
+	return 0;
 }
 
 /* Length of the name without its suffix. */
