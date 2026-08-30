@@ -74,6 +74,11 @@ tier coming back: an image can be composed by a running host, which is
 why ADR-0006 removed it, and an ISO is what you boot to *create* a
 host — there is nothing on the far side to compose anything.
 
+Installers are counted apart from packages, the way `MANIFEST.json` has
+always kept them in separate sections: an ISO is not resolved by
+`name@version` and has no recipe behind it, so it is not one of the
+"N packages".
+
 An unsigned ISO is refused, because an ISO is fetched by a person and
 booted with no recipe checksum vouching for it. **Verify before writing
 the stick, on a machine you already trust** — the signature must be

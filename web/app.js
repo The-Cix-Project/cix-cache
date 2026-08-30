@@ -487,7 +487,18 @@ function renderStatus() {
 	/* Four zlibs and three greps: packages and artifacts differ. */
 	setText("m-unique", String(s.unique_packages));
 	setText("m-packages", String(s.packages));
-	setText("m-bytes", humanBytes(s.package_bytes));
+	/*
+	 * Counted apart from packages, mirroring MANIFEST.json's two
+	 * sections, and shown only when there are any: an ISO is not a
+	 * package, so folding it into that number would make it mean two
+	 * kinds of thing at once.
+	 */
+	const inst = s.installers || 0;
+
+	el("m-installers-wrap").hidden = inst === 0;
+	setText("m-installers", String(inst));
+	/* The size is the whole store, both kinds and their signatures. */
+	setText("m-bytes", humanBytes(s.package_bytes + (s.installer_bytes || 0)));
 	/*
 	 * Only shown when there are any, and coloured. These serve fine
 	 * today and stop being safe the moment another machine's build

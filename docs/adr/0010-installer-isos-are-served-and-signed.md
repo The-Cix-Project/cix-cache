@@ -176,7 +176,30 @@ them — the same class of bug as #6. The walk reports the store as it
 is; presentation decides what to show. A test asserts a real collection
 leaves a signature's blob alone.
 
-### 7. Installers are their own manifest section
+### 7. An installer is counted apart from a package
+
+`installers` and `installer_bytes` in `/api/v1/status`, a figure in the
+menu bar, and a line in `cixcachectl status` — each appearing only when
+there is at least one, on the same rule as everything else here: a
+figure that always reads zero is noise.
+
+Apart, and not folded in, because an ISO is not a package. Nothing
+resolves it by `name@version`, no recipe stands behind it, and it is
+booted rather than installed. Counting it inside "N packages" would
+make that number mean two kinds of thing at once, and the first person
+to reconcile it against `MANIFEST.json` — which has always had them in
+separate sections — would find the two disagreeing.
+
+A signature's bytes count toward its installer rather than toward
+packages, since that is what they belong to.
+
+One consequence worth stating because it looks like a contradiction:
+`cixcachectl ls` lists packages and installers together, so its total
+counts both, while `status` reports them separately. When both are
+present the listing breaks its total down rather than leaving two
+numbers that appear to disagree.
+
+### 8. Installers are their own manifest section
 
 `installers`, not inside `packages`. `packages` is consumed by a daemon
 resolving `name@version` for install; an ISO is never installed that

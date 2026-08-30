@@ -172,6 +172,10 @@ cixcachectl put cix-installer-2.2.0-1-x86_64.iso     --token=<t> ...
 Consumers verify with the pinned public key, on a trusted machine,
 **before** writing the stick. The key does not come from this server.
 
+`cixcachectl status` grows an `installers` line, and `ls` a `SIGNED`
+column, once there is an installer to report. Installers are counted
+apart from packages, matching `MANIFEST.json`'s two sections.
+
 ## Operating
 
 ```

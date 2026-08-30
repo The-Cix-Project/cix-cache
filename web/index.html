@@ -40,6 +40,7 @@
 	</a>
 	<span class="stat"><b id="m-unique">&mdash;</b> packages</span>
 	<span class="stat"><b id="m-packages">&mdash;</b> artifacts</span>
+	<span class="stat" id="m-installers-wrap" hidden><b id="m-installers">&mdash;</b> installers</span>
 	<span class="stat"><b id="m-bytes">&mdash;</b></span>
 	<span class="stat warn-stat" id="m-unstamped" title="Published with no architecture -- run cixcached --set-arch" hidden></span>
 	<span class="spacer"></span>
@@ -268,6 +269,13 @@ cixctl --host=&lt;box&gt; pkg sync</code></pre>
 curl -fsSLO http://&lt;host&gt;:8080/cix-installer-2.2.0-1-x86_64.iso.minisig
 minisign -Vm cix-installer-2.2.0-1-x86_64.iso -p cix.pub</code></pre>
 		<p class="note">
+			An ISO is counted apart from packages &mdash; the menu bar grows an
+			<code>installers</code> figure, and so does <code>cixcachectl status</code>, both only
+			once there is one. An ISO is not a package: nothing resolves it by
+			<code>name@version</code> and no recipe stands behind it, so folding it into the
+			package count would make that number mean two kinds of thing.
+		</p>
+		<p class="note">
 			<strong>Verify before writing the stick, on a machine you already trust.</strong>
 			An installer that checks its own signature is the code being checked doing the
 			checking &mdash; a substituted ISO reports success. The public key does not come
@@ -292,6 +300,8 @@ minisign -Vm cix-installer-2.2.0-1-x86_64.iso -p cix.pub</code></pre>
 
   status                     server and store summary
   ls                         every published artifact, paged
+                             (gains ARCH and SIGNED columns only when
+                              those tell rows apart)
   manifest                   MANIFEST.json, generated live
   log [-f]                   what the server has been doing
   gc [--dry-run] [--token=]  remove blobs no name points at

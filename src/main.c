@@ -793,6 +793,15 @@ struct list_ctx {
 	 * not (ADR-0005, and #6).
 	 */
 	long unstamped;
+	/*
+	 * Installers are counted apart from packages, mirroring the two
+	 * sections of MANIFEST.json. An ISO is not a package -- nothing
+	 * resolves it by name@version and no recipe stands behind it -- so
+	 * folding it into "N packages" would make that number mean two
+	 * different kinds of thing.
+	 */
+	long installers;
+	long long installer_bytes;
 	long long bytes;
 	/*
 	 * Distinct artifact names, as opposed to published files. This
@@ -942,13 +951,21 @@ static int count_entry(const char *name, const char *digest, off_t size, time_t 
 	 * Its bytes are real and stay in the size, but it is not an
 	 * artifact anybody installs, so it is not one of "138 artifacts".
 	 */
+	/* A signature's bytes belong to the installer it signs. */
 	if (store_is_signature(name)) {
 		if (size > 0)
-			lc->bytes += (long long)size;
+			lc->installer_bytes += (long long)size;
 		return 0;
 	}
+	/* An ISO with no architecture is as dangerous as a package with none. */
 	if (store_arch_of(name, NULL, 0) == NULL)
 		lc->unstamped++;
+	if (store_needs_signature(name)) {
+		lc->installers++;
+		if (size > 0)
+			lc->installer_bytes += (long long)size;
+		return 0;
+	}
 	remember_name(lc, short_name);
 	lc->count++;
 	if (size > 0)
@@ -1056,6 +1073,10 @@ static void api_status(struct conn *cc)
 	jw_int(&w, g_served_bytes);
 	jw_key(&w, "unstamped");
 	jw_int(&w, pkgs.unstamped);
+	jw_key(&w, "installers");
+	jw_int(&w, pkgs.installers);
+	jw_key(&w, "installer_bytes");
+	jw_int(&w, pkgs.installer_bytes);
 	jw_key(&w, "packages");
 	jw_int(&w, pkgs.count);
 	jw_key(&w, "unique_packages");

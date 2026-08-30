@@ -170,6 +170,14 @@ static void fmt_status(const struct json_value *v)
 	        int_field(v, "unique_packages"), int_field(v, "packages"),
 	        int_field(v, "package_bytes"));
 	/*
+	 * Counted apart from packages, mirroring MANIFEST.json's two
+	 * sections, and shown only when there are any -- a line that always
+	 * reads zero is noise.
+	 */
+	if (int_field(v, "installers") > 0)
+		fprintf(g_out, "installers: %lld (%lld bytes, signatures included)\n",
+		        int_field(v, "installers"), int_field(v, "installer_bytes"));
+	/*
 	 * Only when there are any. An artifact with no architecture serves
 	 * correctly until the day a build for another machine shares its
 	 * name, so nothing else will ever mention it.
@@ -187,6 +195,13 @@ static void fmt_status(const struct json_value *v)
  * up only once two artifacts disagree.
  */
 static int g_show_arch;
+
+/*
+ * Likewise for the signature. Only bootables carry one, so the column
+ * appears only when something in the listing actually does -- against a
+ * store of packages it would be a column of blanks.
+ */
+static int g_show_signed;
 
 static void fmt_artifact_line(const struct json_value *v)
 {
@@ -210,17 +225,31 @@ static void fmt_artifact_line(const struct json_value *v)
 	 * because it is Cix's number, not upstream's -- 5.2.37 is what
 	 * the bash authors released, -2 is what we did to it.
 	 */
-	if (g_show_arch) {
+	{
 		const char *arch = str_field(v, "arch");
+		char cols[64];
+		int n = 0;
 
-		fprintf(g_out, "%-18s %12.12s %4lld %-8s %9s  %.12s  %10s\n", str_field(v, "artifact"),
-		        version[0] != '\0' ? version : "-", int_field(v, "release"),
-		        arch[0] != '\0' ? arch : "-", size, str_field(v, "sha256"), when);
-		return;
+		cols[0] = '\0';
+		if (g_show_arch)
+			n += snprintf(cols + n, sizeof(cols) - (size_t)n, "%-8s ",
+			              arch[0] != '\0' ? arch : "-");
+		/*
+		 * Blank rather than "no" for an artifact that carries no
+		 * signature at all: a package is not unsigned, signing is
+		 * simply not a thing it does.
+		 */
+		if (g_show_signed) {
+			const struct json_value *sig = json_object_get(v, "signed");
+
+			n += snprintf(cols + n, sizeof(cols) - (size_t)n, "%-6s ",
+			              sig == NULL ? "" : (bool_field(v, "signed") ? "yes" : "no"));
+		}
+		(void)n;
+		fprintf(g_out, "%-18s %12.12s %4lld %s %9s  %.12s  %10s\n", str_field(v, "artifact"),
+		        version[0] != '\0' ? version : "-", int_field(v, "release"), cols, size,
+		        str_field(v, "sha256"), when);
 	}
-	fprintf(g_out, "%-18s %12.12s %4lld  %9s  %.12s  %10s\n", str_field(v, "artifact"),
-	        version[0] != '\0' ? version : "-", int_field(v, "release"), size,
-	        str_field(v, "sha256"), when);
 }
 
 static void fmt_artifacts(const struct json_value *v)
@@ -232,22 +261,47 @@ static void fmt_artifacts(const struct json_value *v)
 	if (arr == NULL || arr->type != JSON_ARRAY)
 		return;
 	g_show_arch = 0;
-	for (i = 1; i < arr->u.array.count; i++) {
-		if (strcmp(str_field(arr->u.array.items[i], "arch"),
-		           str_field(arr->u.array.items[0], "arch")) != 0) {
+	g_show_signed = 0;
+	for (i = 0; i < arr->u.array.count; i++) {
+		if (i > 0 && strcmp(str_field(arr->u.array.items[i], "arch"),
+		                    str_field(arr->u.array.items[0], "arch")) != 0)
 			g_show_arch = 1;
-			break;
-		}
+		if (json_object_get(arr->u.array.items[i], "signed") != NULL)
+			g_show_signed = 1;
 	}
-	if (g_show_arch)
-		fprintf(g_out, "%-18s %12s %4s %-8s %9s  %-12s  %10s\n", "ARTIFACT", "VERSION", "REL",
-		        "ARCH", "SIZE", "SHA256", "PUBLISHED");
-	else
-		fprintf(g_out, "%-18s %12s %4s  %9s  %-12s  %10s\n", "ARTIFACT", "VERSION", "REL",
-		        "SIZE", "SHA256", "PUBLISHED");
+	{
+		char head[64];
+		int n = 0;
+
+		head[0] = '\0';
+		if (g_show_arch)
+			n += snprintf(head + n, sizeof(head) - (size_t)n, "%-8s ", "ARCH");
+		if (g_show_signed)
+			n += snprintf(head + n, sizeof(head) - (size_t)n, "%-6s ", "SIGNED");
+		(void)n;
+		fprintf(g_out, "%-18s %12s %4s %s %9s  %-12s  %10s\n", "ARTIFACT", "VERSION", "REL",
+		        head, "SIZE", "SHA256", "PUBLISHED");
+	}
 	for (i = 0; i < arr->u.array.count; i++)
 		fmt_artifact_line(arr->u.array.items[i]);
 	human_bytes(int_field(v, "bytes"), total, sizeof(total));
+	/*
+	 * Broken down when both kinds are present. Otherwise this total
+	 * and the one in `status` use the word "artifacts" for different
+	 * sets -- status counts packages and installers separately, this
+	 * listing shows both -- and the two numbers appear to disagree.
+	 */
+	if (g_show_signed) {
+		long long installers = 0;
+
+		for (i = 0; i < arr->u.array.count; i++) {
+			if (json_object_get(arr->u.array.items[i], "signed") != NULL)
+				installers++;
+		}
+		fprintf(g_out, "\n%lld artifacts (%lld packages, %lld installers), %s\n",
+		        int_field(v, "count"), int_field(v, "count") - installers, installers, total);
+		return;
+	}
 	fprintf(g_out, "\n%lld artifacts, %s\n", int_field(v, "count"), total);
 }
 
