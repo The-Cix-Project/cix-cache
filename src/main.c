@@ -540,6 +540,43 @@ static void finish_upload(struct conn *cc)
 		respond_error(cc, 400, "body does not match declared sha256");
 		return;
 	}
+	/*
+	 * Ask whether this name will be refused BEFORE adopting the body.
+	 *
+	 * Adopting first and finding out at publish leaves the refused
+	 * bytes in blobs/ with nothing pointing at them, until someone
+	 * runs a gc -- a full copy of the artifact for every attempt, and
+	 * a retried push in a CI loop grows the store without bound (#7).
+	 *
+	 * store_publish() still makes the authoritative decision. All this
+	 * settles is whether the temp file becomes a blob or is discarded.
+	 */
+	{
+		char existing[STORE_SHA256_MAX];
+		enum store_error r = store_resolve(cc->up_name, existing, sizeof(existing));
+
+		if (r == STORE_OK && strcmp(existing, digest) != 0) {
+			unlink(cc->up_path);
+			cc->up_path[0] = '\0';
+			server_log("warn", "push %s refused: published as %s, pushed %s", cc->up_name,
+			           existing, digest);
+			respond_error(cc, 409, "already published with a different sha256");
+			return;
+		}
+		if (r != STORE_OK && r != STORE_ERR_NOT_FOUND) {
+			unlink(cc->up_path);
+			cc->up_path[0] = '\0';
+			/*
+			 * Ambiguous is a refusal, not a server fault: the name
+			 * matches artifacts for more than one machine, and which
+			 * of them this push meant is a question only the pusher
+			 * can answer.
+			 */
+			respond_error(cc, r == STORE_ERR_AMBIGUOUS ? 409 : 500, store_error_str(r));
+			return;
+		}
+	}
+
 	e = store_blob_adopt(cc->up_path, digest);
 	cc->up_path[0] = '\0'; /* adopted or unlinked -- either way not ours now */
 	if (e != STORE_OK) {
@@ -549,6 +586,10 @@ static void finish_upload(struct conn *cc)
 	e = store_publish(cc->up_name, digest);
 	if (e == STORE_ERR_CONFLICT) {
 		respond_error(cc, 409, "already published with a different sha256");
+		return;
+	}
+	if (e == STORE_ERR_AMBIGUOUS) {
+		respond_error(cc, 409, store_error_str(e));
 		return;
 	}
 	if (e != STORE_OK) {

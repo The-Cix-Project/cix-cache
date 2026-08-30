@@ -81,8 +81,32 @@ int main(void)
 	 * The invariant: a recipe version is immutable in git, so a
 	 * published name may only ever mean one byte sequence.
 	 */
-	CHECK(put(&ts, b_path, "p-1.0.tar.gz", b_digest, TOKEN) == 409,
-	      "republishing a name with different bytes conflicts");
+	/*
+	 * A refused push must cost nothing on disk. The body used to be
+	 * adopted into blobs/ before the name was checked, so the refusal
+	 * left a full unreferenced copy of the artifact behind until a gc
+	 * (#7).
+	 *
+	 * Counted around the FIRST refusal of these bytes, which is the
+	 * only one that could ever have cost anything: adopting is
+	 * content-addressed, so a retry of the same rejected artifact
+	 * deduplicates onto the orphan already there. One wasted copy per
+	 * distinct refused artifact, not one per attempt.
+	 */
+	{
+		char cmd[512];
+		char before[64];
+		char after[64];
+
+		snprintf(cmd, sizeof(cmd), "ls '%s/blobs' | wc -l", ts.root);
+		CHECK(ts_capture(cmd, before, sizeof(before)) == 0, "count blobs before the refusal");
+
+		CHECK(put(&ts, b_path, "p-1.0.tar.gz", b_digest, TOKEN) == 409,
+		      "republishing a name with different bytes conflicts");
+
+		CHECK(ts_capture(cmd, after, sizeof(after)) == 0, "count blobs after the refusal");
+		CHECK(strcmp(before, after) == 0, "a refused push leaves no blob behind to collect");
+	}
 
 	/*
 	 * There is no second tier any more: a path with a directory
