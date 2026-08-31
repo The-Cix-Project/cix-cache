@@ -302,7 +302,7 @@ static int is_observer_path(const char *path)
 		return 1;
 	if (strcmp(path, "/") == 0 || strcmp(path, "/index.html") == 0 ||
 	    strcmp(path, "/app.js") == 0 || strcmp(path, "/style.css") == 0 ||
-	    strcmp(path, "/favicon.svg") == 0)
+	    strcmp(path, "/favicon.svg") == 0 || strcmp(path, "/InterVariable.woff2") == 0)
 		return 1;
 	return 0;
 }
@@ -1253,6 +1253,8 @@ static const char *content_type_for(const char *path)
 		return "text/css";
 	if (strcmp(dot, ".svg") == 0)
 		return "image/svg+xml";
+	if (strcmp(dot, ".woff2") == 0)
+		return "font/woff2";
 	if (strcmp(dot, ".json") == 0)
 		return "application/json";
 	return "application/octet-stream";

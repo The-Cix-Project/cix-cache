@@ -23,3 +23,10 @@ set, font file or Reserved Font Name is redistributed here.
 
 Regenerating the raster needs Pacifico locally; regenerating the SVGs
 from the raster needs only Python and Pillow.
+
+`web/InterVariable.woff2` is **Inter**, by Rasmus Andersson and the Inter
+Project Authors, licensed under the **SIL Open Font License 1.1**
+(`Inter-LICENSE.txt`). It is the typeface the Cix brand system names, and
+is served from this repository rather than a CDN so the dashboard does
+not depend on the network to render correctly. Redistributed unmodified,
+with its licence, which the OFL permits.

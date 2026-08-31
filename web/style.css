@@ -10,54 +10,92 @@
  * server is DOING. The two kinds of number change on completely
  * different timescales, which is why they live in different places.
  */
+/*
+ * Inter, self-hosted. The brand system names it as the primary UI and
+ * display face (Cix Brand Guidelines v1.0, Typography), and a fallback
+ * stack alone would not deliver it -- almost nobody has Inter
+ * installed, so the page would quietly render in the system sans the
+ * guidelines list only as a fallback.
+ *
+ * One variable file rather than four static weights: it carries the
+ * opsz axis, which is what "Inter Display" is -- the optical size cut
+ * for large headlines -- so the same 337KB covers both roles the brand
+ * asks for. No CDN, for the reason every other asset here is local: an
+ * operations dashboard has to work when other things do not.
+ */
+@font-face {
+	font-family: "InterVariable";
+	src: url("/InterVariable.woff2") format("woff2");
+	font-weight: 100 900;
+	font-style: normal;
+	font-display: swap;
+}
+
+/*
+ * Colours are the Cix palette (Brand Guidelines v1.0, Colour system),
+ * defined once as custom properties so light and dark differ only in
+ * this block and never in a rule.
+ *
+ * Dark mode uses the brand hexes unchanged -- every signal colour is
+ * built for a dark ground and clears 5:1 on Carbon.
+ *
+ * Light mode cannot. Measured against Paper, Nickel is 2.28:1, Copper
+ * 2.73:1, Phosphor 1.25:1 and Amber 1.70:1 -- all below the 4.5:1 a
+ * reader needs. So the light values are each darkened along their own
+ * hue until they clear it, keeping the hue and saturation of the brand
+ * colour they come from. That is a deliberate, documented and
+ * reversible exception of the kind the guidelines' AUTHORITY clause
+ * provides for, and it is the same instruction the Product UI section
+ * gives directly: never generate light mode by inverting dark.
+ */
 :root {
 	color-scheme: light dark;
-	--bg: #f5f5f7;
-	--panel: #ffffff;
-	--text: #1c1c1e;
-	--muted: #6e6e73;
-	--border: #d8d8dc;
-	--ok: #1e8e3e;
-	--warn: #c77b06;
-	--error: #c5221f;
-	--accent: #0b64c4;
-	--logo-accent: #00a8e0;
-	--row-alt: rgba(0, 0, 0, 0.035);
-	--hover: rgba(0, 0, 0, 0.05);
-	--shadow: 0 8px 28px rgba(0, 0, 0, 0.14);
+	--bg: #f3f0e7;         /* Paper */
+	--panel: #ffffff;      /* white, which the brand allows for system-native surfaces */
+	--text: #0a0d0f;       /* Carbon */
+	--muted: #646f76;      /* Nickel, darkened to 4.5:1 on Paper */
+	--border: #dcd7ca;     /* Paper-tinted divider; Machined is a dark-surface colour */
+	--ok: #547813;         /* Phosphor, darkened */
+	--warn: #8d6715;       /* Amber, darkened */
+	--error: #d02d25;      /* Fault, darkened */
+	--accent: #ad5424;     /* Copper, darkened */
+	--logo-accent: #ad5424;
+	--row-alt: rgba(10, 13, 15, 0.035);
+	--hover: rgba(10, 13, 15, 0.05);
+	--shadow: 0 8px 28px rgba(10, 13, 15, 0.14);
 }
 
 @media (prefers-color-scheme: dark) {
 	:root:not([data-theme="light"]) {
-		--bg: #121214;
-		--panel: #1c1c1e;
-		--text: #f2f2f2;
-		--muted: #98989d;
-		--border: #333336;
-		--ok: #37c05a;
-		--warn: #e2a03f;
-		--error: #ff6b60;
-		--accent: #4c9bf5;
-	--logo-accent: #22bdf0;
-		--logo-accent: #22bdf0;
-		--row-alt: rgba(255, 255, 255, 0.04);
-		--hover: rgba(255, 255, 255, 0.07);
+		--bg: #0a0d0f;         /* Carbon */
+		--panel: #151a1e;      /* Ferrite */
+		--text: #f3f0e7;       /* Paper */
+		--muted: #98a2a8;      /* Nickel */
+		--border: #242c31;     /* Machined */
+		--ok: #b9e769;         /* Phosphor */
+		--warn: #e4b34a;       /* Amber */
+		--error: #e15d57;      /* Fault */
+		--accent: #d87945;     /* Copper */
+		--logo-accent: #d87945;
+		--row-alt: rgba(243, 240, 231, 0.04);
+		--hover: rgba(243, 240, 231, 0.07);
 		--shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
 	}
 }
 
 :root[data-theme="dark"] {
-	--bg: #121214;
-	--panel: #1c1c1e;
-	--text: #f2f2f2;
-	--muted: #98989d;
-	--border: #333336;
-	--ok: #37c05a;
-	--warn: #e2a03f;
-	--error: #ff6b60;
-	--accent: #4c9bf5;
-	--row-alt: rgba(255, 255, 255, 0.04);
-	--hover: rgba(255, 255, 255, 0.07);
+	--bg: #0a0d0f;
+	--panel: #151a1e;
+	--text: #f3f0e7;
+	--muted: #98a2a8;
+	--border: #242c31;
+	--ok: #b9e769;
+	--warn: #e4b34a;
+	--error: #e15d57;
+	--accent: #d87945;
+	--logo-accent: #d87945;
+	--row-alt: rgba(243, 240, 231, 0.04);
+	--hover: rgba(243, 240, 231, 0.07);
 	--shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
 }
 
@@ -69,7 +107,8 @@ body {
 	margin: 0;
 	background: var(--bg);
 	color: var(--text);
-	font: 0.85rem/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	font: 0.85rem/1.5 "InterVariable", Inter, "Noto Sans", system-ui, -apple-system,
+		"Segoe UI", Roboto, sans-serif;
 	display: flex;
 	flex-direction: column;
 	height: 100vh;
@@ -216,35 +255,39 @@ main[hidden] {
  * on a search-first page the name belongs with the thing you came to
  * use, not tucked into a corner.
  */
+/*
+ * Set as type, not shipped as traced outlines.
+ *
+ * The brand system is explicit that final logo artwork is still open
+ * and that official geometry must not be invented from a text mockup
+ * (Logo system, "PENDING FINAL ARTWORK"). Tracing a typeset name into
+ * paths and shipping it as the wordmark would be doing exactly that.
+ * As live text it is honestly what it is -- the product name set in
+ * the brand face -- and it stays selectable and searchable.
+ *
+ * Lower case, because the primary wordmark is lower-case cix. Tracking
+ * is left alone: the guidelines call out avoiding ultra-tight tracking
+ * on display sizes, and Inter's own optical-size axis already tightens
+ * appropriately as the size grows.
+ */
 .wordmark {
 	margin: 0 0 1.6rem;
-	line-height: 0;
+	text-align: center;
+	font-size: clamp(2.4rem, 7vw, 3.6rem);
+	font-weight: 700;
+	font-variation-settings: "opsz" 32;
+	line-height: 1.02;
+	letter-spacing: -0.015em;
+	color: var(--text);
 	user-select: none;
 }
 
 /*
- * The wordmark is the name set in the script the artwork is drawn in,
- * traced to paths rather than loaded as a webfont: a webfont would mean
- * either a CDN this dashboard must not depend on at view time or a
- * 330KB file to draw nine glyphs, and a flash of fallback type either
- * way. Two paths so each half colours on its own -- "cix" takes the
- * page's text colour and inverts with the theme, "-cache" keeps the
- * brand cyan, which carries on both grounds. Regenerate both with
- * tools/trace-logo.py.
+ * cix is the wordmark; -cache is the descriptor beside it, which is
+ * the lockup shape the brand describes. Copper carries the accent.
  */
-.logo {
-	display: block;
-	margin: 0 auto;
-	width: min(430px, 66%);
-	height: auto;
-}
-
-.logo-mark {
-	fill: currentColor;
-}
-
-.logo-word {
-	fill: var(--logo-accent);
+.wordmark span {
+	color: var(--accent);
 }
 
 /* Smaller viewports: the wordmark gives up width before the box does. */

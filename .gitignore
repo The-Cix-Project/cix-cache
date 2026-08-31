@@ -1,11 +1,17 @@
 # The artifact store. Binaries live in the registry, never in git --
+# and the pattern is a whole-directory one on purpose. It used to list
+# suffixes (*.tar.gz), which silently stopped covering the store the
+# day a second artifact kind appeared: the first ISOs published were
+# staged for commit by an ordinary `git add -A`. An allow-nothing rule
+# cannot fall behind the store's contents that way.
 # that separation is the security model, not a size decision: recipes
 # are reviewable text in the Cix repository, artifacts are opaque bytes
 # here, and the recipe's checksum is what approves them.
 cache/blobs/
 cache/tmp/
-cache/packages/*.tar.gz
+cache/packages/*
 cache/*.tar.gz
+cache/*.iso
 
 # Build output
 build/

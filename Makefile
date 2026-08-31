@@ -92,7 +92,7 @@ install: $(BUILD)/cixcached $(BUILD)/cixcachectl
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/web $(DESTDIR)$(PREFIX)/etc
 	install -m 0755 $(BUILD)/cixcached $(DESTDIR)$(PREFIX)/bin/cixcached
 	install -m 0755 $(BUILD)/cixcachectl $(DESTDIR)$(PREFIX)/bin/cixcachectl
-	install -m 0644 web/index.html web/app.js web/style.css web/favicon.svg $(DESTDIR)$(PREFIX)/share/web/
+	install -m 0644 web/index.html web/app.js web/style.css web/favicon.svg web/InterVariable.woff2 $(DESTDIR)$(PREFIX)/share/web/
 	@echo "installed to $(DESTDIR)$(PREFIX)"
 
 clean:

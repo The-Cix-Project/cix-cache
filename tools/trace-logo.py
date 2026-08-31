@@ -39,7 +39,6 @@ import re
 import sys
 from PIL import Image
 
-SRC_WORDMARK = "design/cix-cache-wordmark.png"
 
 # The mark is authored vector art, not traced. In cix-cache-logo.png its
 # lower right stroke runs into the cyan of "ache", so separating that
@@ -55,7 +54,6 @@ SRC_TILE = "design/cix-tile.svg"
 # the background.
 FAVICON_LIGHT = ("#1c1c1e", "#f5f5f7")
 FAVICON_DARK = ("#f2f2f2", "#121214")
-OUT_WORDMARK = "build/wordmark-inline.svg"
 OUT_MARK = "build/mark-inline.svg"
 OUT_FAVICON = "web/favicon.svg"
 
@@ -328,11 +326,6 @@ def read_tile():
 
 
 def main():
-	word = Image.open(SRC_WORDMARK).convert("RGBA")
-	wblk, wcyn, ww, wh = fields(word)
-	open(OUT_WORDMARK, "w").write(
-		emit(build(wblk, ww, wh, EPS, 6.0), build(wcyn, ww, wh, EPS, 6.0), "cix-cache", "logo"))
-
 	inner = read_tile()
 
 	# The mark alone, for the menu bar. The word is not in it: at menu
@@ -354,7 +347,7 @@ def main():
 		'</style>\n%s\n</svg>\n'
 		% (FAVICON_LIGHT[0], FAVICON_LIGHT[1], FAVICON_DARK[0], FAVICON_DARK[1], inner))
 
-	for path in (OUT_WORDMARK, OUT_MARK, OUT_FAVICON):
+	for path in (OUT_MARK, OUT_FAVICON):
 		sys.stderr.write("  %-28s %6d bytes\n" % (path, len(open(path).read())))
 
 
