@@ -101,13 +101,63 @@ token block.
 That is the price of the brand face actually being the brand face, and
 it is paid once.
 
-The menu bar mark remains the tile artwork supplied for it. Worth
-flagging against the brand's own criteria, which say a logo must work in
-one colour and **must not depend on being enclosed in a rounded-square
-app icon**. The current tile does depend on that. It is not changed here
-because it is supplied artwork and the brand system says final logo work
-is still open — but it is a known divergence, not an oversight.
-
 The exact light-mode values are derived, so if the brand system later
 publishes its own light-surface variants, those replace these rather
 than being reconciled with them.
+
+## The rest of the audit
+
+Checked the whole surface against the guidelines rather than only the
+thing that prompted this.
+
+### Also fixed
+
+**The mark no longer sits in a rounded-square tile.** The criteria
+require a mark that works in one colour and *must not depend on being
+enclosed in a rounded-square app icon* — and a tile supplying the
+contrast is exactly that dependency. The glyph now takes `currentColor`
+with no enclosing shape, in the menu bar and as the favicon. The tile
+artwork is kept as `design/cix-tile.svg`; it is simply not what ships.
+
+The favicon window is sized to the mark's *width* so it fills the square
+edge to edge, letterboxed only vertically. It reads at 16px, though a
+purpose-drawn small-size variant — which the criteria offer as the
+alternative to being recognisable at that size — is design work that
+belongs with the pending final artwork.
+
+**A visible focus state on everything keyboard-operable.** There was
+none: the sortable column headers changed colour on focus, which is both
+faint and conveys state by colour alone. Now a 2px outline with an
+offset, on `:focus-visible` so a pointer click does not leave a ring.
+Required by the accessibility section and by WCAG 2.2 AA, which that
+section sets as the baseline.
+
+**Reduced motion is honoured.** There was no `prefers-reduced-motion`
+rule at all, against three transitions. None of them is load-bearing, so
+honouring the preference costs nothing.
+
+### Checked and already compliant
+
+- icon strokes are 1.7–2 at a 24px nominal box, inside the 1.5–2 rule;
+- monitoring tables use tabular figures;
+- status is never colour alone — `signed` reads yes/no, reachability
+  reads reachable/unreachable, hits and misses are numbers, and the
+  unstamped warning is a count with a sentence;
+- the CLI uses no colour at all, so nothing there depends on it;
+- all-caps appears only as table labels, which is the permitted use.
+
+### Known divergences, deliberately not fixed here
+
+**Spacing is not on the 8px grid.** The composition section requires an
+8px base with 4px half-steps and says not to use arbitrary values. This
+stylesheet is full of them — `0.28rem`, `0.85rem`, `1.4rem`. Fixing it
+means retuning every component's padding and gaps at once, which is a
+larger and riskier change than a palette swap and wants to be done
+deliberately rather than folded into this.
+
+**`cixcachectl` is off the CLI grammar.** The naming section defines
+`cix <resource> <verb>` and says to prefer `cix package` over compact
+binary names except where technically necessary. The brand-correct form
+of this tool is `cix cache <verb>`, as a subcommand of the main CLI.
+That is a cross-repository change to `itdlabs/cix`, not something this
+repository can do alone.

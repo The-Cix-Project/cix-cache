@@ -103,6 +103,40 @@
 	box-sizing: border-box;
 }
 
+/*
+ * A visible focus state on everything keyboard-operable. The brand's
+ * accessibility section requires one for every keyboard-operable
+ * action, and WCAG 2.2 AA -- which it sets as the baseline -- makes it
+ * a conformance item rather than a preference.
+ *
+ * :focus-visible rather than :focus, so a pointer click does not leave
+ * a ring behind; and an outline with an offset rather than a colour
+ * change, because a colour change alone conveys state by colour alone,
+ * which the same section forbids.
+ */
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+	border-radius: 3px;
+}
+
+/*
+ * Reduced motion, also required by the accessibility section. Nothing
+ * here is load-bearing animation -- a hover tint, the log dock's
+ * chevron, the activity lights -- so honouring the preference costs
+ * nothing and removing it costs someone a headache.
+ */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		transition-duration: 0.01ms !important;
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		scroll-behavior: auto !important;
+	}
+}
+
 body {
 	margin: 0;
 	background: var(--bg);
@@ -333,12 +367,13 @@ main[hidden] {
  * media query, because a favicon is drawn by the browser chrome and
  * cannot see these properties.
  */
-.tile-bg {
-	fill: var(--text);
-}
-
-.tile-fg {
-	fill: var(--bg);
+/*
+ * One colour, taking the page's text colour, with no enclosing shape.
+ * The brand's logo criteria require a mark that works in one colour and
+ * does not depend on a rounded-square app icon behind it.
+ */
+.mark-fg {
+	fill: currentColor;
 }
 
 .brand:hover {
@@ -937,8 +972,7 @@ th.sortable {
 	user-select: none;
 }
 
-th.sortable:hover,
-th.sortable:focus-visible {
+th.sortable:hover {
 	color: var(--accent);
 }
 

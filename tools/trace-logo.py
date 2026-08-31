@@ -45,15 +45,28 @@ from PIL import Image
 # image by colour cuts the stroke where the two meet and the glyph comes
 # out clipped -- which is what shipped before this. Nothing here traces
 # the mark any more; it is copied from the drawn source.
-SRC_TILE = "design/cix-tile.svg"
+#
+# The GLYPH, with no enclosing shape. The rounded-square tile it was
+# extracted from is kept as design/cix-tile.svg but is not what ships:
+# the brand system's logo criteria require a mark that works in one
+# colour and does not depend on being enclosed in an app icon, and a
+# tile that supplies the contrast is exactly that dependency.
+SRC_MARK = "design/cix-mark.svg"
 
 # The favicon cannot see the page's theme -- it is drawn by the browser
 # chrome, not the document -- so it carries its own media query instead
-# of custom properties. These are the same tokens the stylesheet uses,
-# inverted the same way: the tile takes the text colour and the glyph
-# the background.
-FAVICON_LIGHT = ("#1c1c1e", "#f5f5f7")
-FAVICON_DARK = ("#f2f2f2", "#121214")
+# of custom properties. Carbon on light, Paper on dark: the brand
+# neutrals, matching what the stylesheet resolves to.
+FAVICON_LIGHT = "#0a0d0f"
+FAVICON_DARK = "#f3f0e7"
+
+# A square window onto the mark's own 255x150 box, sized to the mark's
+# WIDTH so it fills the square edge to edge and is letterboxed only
+# vertically. Padding both axes wastes the 16px that matters most.
+# Cropping to the loop instead would make it bigger still, but reduces
+# the mark to a plain ring that could belong to any project starting
+# with C.
+FAVICON_VIEWBOX = "0 -52.5 255 255"
 OUT_MARK = "build/mark-inline.svg"
 OUT_FAVICON = "web/favicon.svg"
 
@@ -315,18 +328,18 @@ def emit(rings_dark, rings_cyan, label, cls):
 		        cls, (x1 - x0) + 2 * pad, (y1 - y0) + 2 * pad, label, label, body))
 
 
-def read_tile():
-	"""The tile's innards, straight from the drawn source."""
-	svg = open(SRC_TILE).read()
+def read_mark():
+	"""The mark's innards, straight from the drawn source."""
+	svg = open(SRC_MARK).read()
 	m = re.search(r"<svg[^>]*>(.*)</svg>", svg, re.S)
 	if m is None:
-		sys.stderr.write("%s: no svg element found\n" % SRC_TILE)
+		sys.stderr.write("%s: no svg element found\n" % SRC_MARK)
 		sys.exit(1)
 	return m.group(1).strip()
 
 
 def main():
-	inner = read_tile()
+	inner = read_mark()
 
 	# The mark alone, for the menu bar. The word is not in it: at menu
 	# bar height the script would be an unreadable smudge, and the mark
@@ -334,18 +347,16 @@ def main():
 	# Inline in the document so its two classes resolve against the
 	# page's own custom properties.
 	open(OUT_MARK, "w").write(
-		'<svg class="mark" viewBox="0 0 256 256" role="img" aria-label="cix" '
+		'<svg class="mark" viewBox="0 0 255 150" role="img" aria-label="cix" '
 		'xmlns="http://www.w3.org/2000/svg">\n%s\n</svg>\n' % inner)
 
 	open(OUT_FAVICON, "w").write(
-		'<svg viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">\n'
+		'<svg viewBox="%s" xmlns="http://www.w3.org/2000/svg">\n'
 		'<style>\n'
-		'.tile-bg { fill: %s } .tile-fg { fill: %s }\n'
-		'@media (prefers-color-scheme: dark) {\n'
-		'.tile-bg { fill: %s } .tile-fg { fill: %s }\n'
-		'}\n'
+		'.mark-fg { fill: %s }\n'
+		'@media (prefers-color-scheme: dark) { .mark-fg { fill: %s } }\n'
 		'</style>\n%s\n</svg>\n'
-		% (FAVICON_LIGHT[0], FAVICON_LIGHT[1], FAVICON_DARK[0], FAVICON_DARK[1], inner))
+		% (FAVICON_VIEWBOX, FAVICON_LIGHT, FAVICON_DARK, inner))
 
 	for path in (OUT_MARK, OUT_FAVICON):
 		sys.stderr.write("  %-28s %6d bytes\n" % (path, len(open(path).read())))
