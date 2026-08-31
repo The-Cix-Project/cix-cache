@@ -148,14 +148,14 @@ honouring the preference costs nothing.
 
 ### Known divergences, deliberately not fixed here
 
-**Spacing is not on the 8px grid.** The composition section requires an
+**Spacing is not on the 8px grid** (#10)**.** The composition section requires an
 8px base with 4px half-steps and says not to use arbitrary values. This
 stylesheet is full of them — `0.28rem`, `0.85rem`, `1.4rem`. Fixing it
 means retuning every component's padding and gaps at once, which is a
 larger and riskier change than a palette swap and wants to be done
 deliberately rather than folded into this.
 
-**`cixcachectl` is off the CLI grammar.** The naming section defines
+**`cixcachectl` is off the CLI grammar** (#11)**.** The naming section defines
 `cix <resource> <verb>` and says to prefer `cix package` over compact
 binary names except where technically necessary. The brand-correct form
 of this tool is `cix cache <verb>`, as a subcommand of the main CLI.
