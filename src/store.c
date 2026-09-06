@@ -1165,13 +1165,26 @@ static int cmp_by_version(const void *a, const void *b)
 	char yn[STORE_NAME_MAX];
 	char xv[STORE_NAME_MAX];
 	char yv[STORE_NAME_MAX];
+	int xr = 1;
+	int yr = 1;
 	int r;
 
-	store_split_display(x->name, xn, sizeof(xn), xv, sizeof(xv), NULL, NULL, 0);
-	store_split_display(y->name, yn, sizeof(yn), yv, sizeof(yv), NULL, NULL, 0);
+	store_split_display(x->name, xn, sizeof(xn), xv, sizeof(xv), &xr, NULL, 0);
+	store_split_display(y->name, yn, sizeof(yn), yv, sizeof(yv), &yr, NULL, 0);
 	r = store_version_cmp(xv, yv);
 	if (r != 0)
 		return r;
+	/*
+	 * Then the release, as a NUMBER. Without this the tiebreak fell
+	 * through to comparing names as strings, and every package whose
+	 * revisions share an upstream version -- which is most of them --
+	 * came out in string order: zlib release 10 sorted above release
+	 * 2, and release 1 above release 6. Ordering by version is the one
+	 * job this comparator has, and for the commonest case in the store
+	 * it was doing the opposite.
+	 */
+	if (xr != yr)
+		return xr < yr ? -1 : 1;
 	/* Total, so the rank does not depend on the input order. */
 	return strcmp(x->name, y->name);
 }

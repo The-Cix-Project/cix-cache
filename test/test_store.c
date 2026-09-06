@@ -624,6 +624,78 @@ static void test_version_cmp(void)
 }
 
 /*
+ * Ordering revisions of ONE upstream version -- the commonest shape in
+ * this store, and the one the comparator originally got backwards. All
+ * of these share a version, so ordering falls to the release, and a
+ * string tiebreak puts 10 above 2 and 1 above 6.
+ */
+static void test_release_order(const char *root)
+{
+	static const char *const names[] = { "relpkg-1.3.2-2-x86_64.tar.gz",
+	                                     "relpkg-1.3.2-10-x86_64.tar.gz",
+	                                     "relpkg-1.3.2-1-x86_64.tar.gz",
+	                                     "relpkg-1.3.2-12-x86_64.tar.gz",
+	                                     "relpkg-1.3.2-9-x86_64.tar.gz" };
+	static const int want[] = { 1, 2, 9, 10, 12 };
+	struct store_entry *ents = NULL;
+	struct store_entry *mine[5];
+	char digest[STORE_SHA256_MAX];
+	char tmp[512];
+	int n;
+	int i;
+	int j;
+	int k = 0;
+
+	snprintf(tmp, sizeof(tmp), "%s/tmp/relpay", root);
+	write_file(tmp, "release ordering payload");
+	CHECK(store_hash_file(tmp, digest, sizeof(digest)) == 0, "hash the payload");
+	CHECK(store_blob_adopt(tmp, digest) == STORE_OK, "adopt it");
+	for (i = 0; i < 5; i++)
+		CHECK(store_publish(names[i], digest) == STORE_OK, "publish a revision");
+
+	n = store_list(&ents);
+	CHECK(n > 0, "list the store");
+	store_rank_versions(ents, n);
+
+	for (i = 0; i < n && k < 5; i++) {
+		char nm[STORE_NAME_MAX];
+		char vv[STORE_NAME_MAX];
+
+		store_split_display(ents[i].name, nm, sizeof(nm), vv, sizeof(vv), NULL, NULL, 0);
+		if (strcmp(nm, "relpkg") == 0)
+			mine[k++] = &ents[i];
+	}
+	CHECK(k == 5, "all five revisions listed");
+
+	/* Selection sort by rank -- five items, and clearer than qsort here. */
+	for (i = 0; i < k; i++) {
+		for (j = i + 1; j < k; j++) {
+			if (mine[j]->version_rank < mine[i]->version_rank) {
+				struct store_entry *t = mine[i];
+
+				mine[i] = mine[j];
+				mine[j] = t;
+			}
+		}
+	}
+	for (i = 0; i < k; i++) {
+		char nm[STORE_NAME_MAX];
+		char vv[STORE_NAME_MAX];
+		char msg[160];
+		int rel = 0;
+
+		store_split_display(mine[i]->name, nm, sizeof(nm), vv, sizeof(vv), &rel, NULL, 0);
+		snprintf(msg, sizeof(msg), "position %d in version order is release %d, got %d", i,
+		         want[i], rel);
+		CHECK(rel == want[i], msg);
+	}
+
+	free(ents);
+	for (i = 0; i < 5; i++)
+		store_unpublish(names[i]);
+}
+
+/*
  * Bootables and their signatures (#8).
  *
  * The signature shares its artifact's stem, so release and
@@ -708,6 +780,7 @@ int main(void)
 	 */
 	test_canonical_alias(root);
 	test_canonicalize_migration(root);
+	test_release_order(root);
 	test_list_order(root);
 	test_arch(root);
 	test_signatures();
