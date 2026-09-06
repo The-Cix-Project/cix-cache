@@ -165,31 +165,36 @@ the refusal lands before the body is uploaded:
 
 ```
 minisign -Sm cix-installer-2.2.0-1-x86_64.iso        # produces .iso.minisig
-cixcachectl put cix-installer-2.2.0-1-x86_64.iso.minisig --token=<t> ...
-cixcachectl put cix-installer-2.2.0-1-x86_64.iso     --token=<t> ...
+cixcachectl publish cix-installer-2.2.0-1-x86_64.iso.minisig --token=<t> ...
+cixcachectl publish cix-installer-2.2.0-1-x86_64.iso     --token=<t> ...
 ```
 
 Consumers verify with the pinned public key, on a trusted machine,
 **before** writing the stick. The key does not come from this server.
 
-`cixcachectl status` grows an `installers` line, and `ls` a `SIGNED`
-column, once there is an installer to report. Installers are counted
+`cixcachectl status` grows an `installers` line, and `list` a
+`SIGNED` column, once there is an installer to report. Installers are counted
 apart from packages, matching `MANIFEST.json`'s two sections.
 
 ## Operating
 
 ```
 cixcachectl status                        # store and server summary
-cixcachectl ls                            # every published artifact, paged
+cixcachectl list                          # every published artifact, paged
 cixcachectl log [-f]                      # what the server has been doing
 cixcachectl manifest                      # MANIFEST.json, generated live
 cixcachectl gc --dry-run                  # what collection would remove
 cixcachectl gc --token=<t>                # remove unreferenced blobs
-cixcachectl rm NAME --token=<t>           # unpublish a name
-cixcachectl put FILE --name=N --sha256=H --token=<t>
+cixcachectl delete NAME --token=<t>       # unpublish a name
+cixcachectl publish FILE --name=N --sha256=H --token=<t>
 ```
 
-`ls` shows artifact, version and release in separate columns; the
+Verbs follow the Cix CLI grammar: `list`, `publish`, `delete`. The
+older `ls`, `put` and `rm` keep working as aliases and are not going
+away on a schedule — muscle memory and existing scripts are the real
+cost of a rename, and breaking them buys nothing.
+
+`list` shows artifact, version and release in separate columns; the
 release is Cix's number, not upstream's. It lists newest-published
 first, and grows an architecture column only once two artifacts differ
 by one. `status` grows an `unstamped` line only when there is something
@@ -199,7 +204,7 @@ to stamp.
 without re-reading the file, which is how to check what is already
 published before pushing over it — and on dashboard assets.
 
-`rm` unpublishes a name; the blob survives until collected. A push whose
+`delete` unpublishes a name; the blob survives until collected. A push whose
 body does not match its declared `X-Cix-Sha256` is refused with 400, and
 republishing a name with *different* bytes is refused with 409 — a recipe
 version is immutable, so a published name may only ever mean one byte

@@ -294,7 +294,7 @@ minisign -Vm cix-installer-2.2.0-1-x86_64.iso -p cix.pub</code></pre>
 		<pre><code>cixcachectl [--host=H] [--port=N] [--json] &lt;command&gt;
 
   status                     server and store summary
-  ls                         every published artifact, paged
+  list                       every published artifact, paged
                              (gains ARCH and SIGNED columns only when
                               those tell rows apart)
   manifest                   MANIFEST.json, generated live
@@ -302,8 +302,17 @@ minisign -Vm cix-installer-2.2.0-1-x86_64.iso -p cix.pub</code></pre>
   gc [--dry-run] [--token=]  remove blobs no name points at
   import [--token=]          migrate a static export
   import-status              progress of a running import
-  put FILE --name=N --sha256=H [--token=]
-  rm NAME [--token=]</code></pre>
+  publish FILE --name=N --sha256=H [--token=]
+  delete NAME [--token=]
+
+  ls, put and rm still work, as aliases.</code></pre>
+		<p>
+			Verbs are plain English, per the Cix CLI grammar: <code>list</code>,
+			<code>publish</code>, <code>delete</code>. The older <code>ls</code>,
+			<code>put</code> and <code>rm</code> keep working as aliases, because an
+			operator's muscle memory and any script already written are the real cost of a
+			rename.
+		</p>
 		<p>
 			Exit codes: <code>0</code> success, <code>1</code> the server refused or was
 			unreachable, <code>2</code> a usage error. List output pages through

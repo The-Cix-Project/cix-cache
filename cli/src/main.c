@@ -391,7 +391,8 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 	}
 	if (path == NULL || name == NULL || digest == NULL) {
 		fprintf(stderr,
-		        "usage: cixcachectl put FILE --name=NAME.tar.gz --sha256=HEX [--token=TOK]\n");
+		        "usage: cixcachectl publish FILE --name=NAME.tar.gz "
+		        "--sha256=HEX [--token=TOK]\n");
 		return 2;
 	}
 	fd = open(path, O_RDONLY);
@@ -516,20 +517,28 @@ static int cmd_log_follow(const struct cix_client *c, const char *token)
 	}
 }
 
+/* A command matches its name, or the older spelling it replaced. */
+static int is_cmd(const char *cmd, const char *name, const char *alias)
+{
+	return strcmp(cmd, name) == 0 || (alias != NULL && strcmp(cmd, alias) == 0);
+}
+
 static void usage(FILE *out)
 {
 	fprintf(out,
 	        "usage: cixcachectl [--host=H] [--port=N] [--json] <command>\n"
 	        "\n"
 	        "  status                     server and store summary\n"
-	        "  ls                         every published artifact\n"
+	        "  list                       every published artifact\n"
 	        "  manifest                   MANIFEST.json, generated live\n"
 	        "  log [-f]                   what the server has been doing\n"
 	        "  gc [--dry-run] [--token=]  remove blobs no name points at\n"
 	        "  import [--token=]          migrate a static export into the store\n"
 	        "  import-status              progress of a running import\n"
-	        "  put FILE --name=N --sha256=H [--token=]\n"
-	        "  rm NAME [--token=]\n");
+	        "  publish FILE --name=N --sha256=H [--token=]\n"
+	        "  delete NAME [--token=]\n"
+	        "\n"
+	        "  ls, put and rm still work, as aliases for list, publish and delete.\n");
 }
 
 static int dispatch_command(const struct cix_client *c, int json_mode, const char *cmd, int argc,
@@ -548,31 +557,39 @@ static int dispatch_command(const struct cix_client *c, int json_mode, const cha
 		else if (strcmp(argv[i], "--follow") == 0 || strcmp(argv[i], "-f") == 0)
 			follow = 1;
 	}
-	if (strcmp(cmd, "status") == 0)
+	/*
+	 * The brand system asks for plain English verbs -- list, delete --
+	 * rather than shell abbreviations, and says explicitly to use
+	 * "delete" when deleting rather than softening it. The old spellings
+	 * stay as aliases: an operator's muscle memory and any script
+	 * already written are the real cost of a rename, and a hard break
+	 * buys nothing here.
+	 */
+	if (is_cmd(cmd, "status", NULL))
 		return one_call(c, json_mode, "GET", "/api/v1/status", token, fmt_status, 0);
-	if (strcmp(cmd, "ls") == 0)
+	if (is_cmd(cmd, "list", "ls"))
 		return one_call(c, json_mode, "GET", "/api/v1/artifacts", token, fmt_artifacts, 1);
-	if (strcmp(cmd, "manifest") == 0)
+	if (is_cmd(cmd, "manifest", NULL))
 		return one_call(c, json_mode, "GET", "/MANIFEST.json", token, NULL, 1);
-	if (strcmp(cmd, "log") == 0) {
+	if (is_cmd(cmd, "log", NULL)) {
 		if (follow)
 			return cmd_log_follow(c, token);
 		return one_call(c, json_mode, "GET", "/api/v1/log?after=0", token, fmt_log, 1);
 	}
-	if (strcmp(cmd, "gc") == 0)
+	if (is_cmd(cmd, "gc", NULL))
 		return one_call(c, json_mode, dry_run ? "GET" : "POST", "/api/v1/gc", token, fmt_gc, 0);
-	if (strcmp(cmd, "import") == 0)
+	if (is_cmd(cmd, "import", NULL))
 		return one_call(c, json_mode, "POST", "/api/v1/import", token, fmt_accepted, 0);
-	if (strcmp(cmd, "import-status") == 0)
+	if (is_cmd(cmd, "import-status", NULL))
 		return one_call(c, json_mode, "GET", "/api/v1/import-status", token, fmt_import_status,
 		                0);
-	if (strcmp(cmd, "put") == 0)
+	if (is_cmd(cmd, "publish", "put"))
 		return cmd_put(c, argc, argv);
-	if (strcmp(cmd, "rm") == 0) {
+	if (is_cmd(cmd, "delete", "rm")) {
 		char path[600];
 
 		if (argc < 1 || argv[0][0] == '-') {
-			fprintf(stderr, "usage: cixcachectl rm NAME [--token=TOK]\n");
+			fprintf(stderr, "usage: cixcachectl delete NAME [--token=TOK]\n");
 			return 2;
 		}
 		snprintf(path, sizeof(path), "/%s", argv[0]);
