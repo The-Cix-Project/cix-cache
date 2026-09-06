@@ -540,6 +540,34 @@ static void test_arch(const char *root)
 	      "with it gone the bare name is unambiguous again");
 	CHECK(store_unpublish("barepkg-2.0-1-aarch64.tar.gz") == STORE_OK, "clean up");
 
+	/*
+	 * The same artifact under two spellings is not ambiguous. Stamping
+	 * a store after something was pushed bare, and the bare name being
+	 * pushed again afterwards, leaves exactly this -- and refusing it
+	 * would 409 a name whose answer is not in doubt. Seen live on a
+	 * zlib that had been published both ways.
+	 */
+	CHECK(store_publish("twin-1.0-1-x86_64.tar.gz", digest_x) == STORE_OK, "publish stamped");
+	{
+		char link[512];
+		char target[128];
+
+		snprintf(link, sizeof(link), "%s/%s/twin-1.0-1.tar.gz", root, STORE_DIR);
+		snprintf(target, sizeof(target), "../blobs/%s", digest_x);
+		CHECK(symlink(target, link) == 0, "and the same bytes under the bare name");
+	}
+	CHECK(store_resolve("twin-1.0-1.tar.gz", got, sizeof(got)) == STORE_OK &&
+	              strcmp(got, digest_x) == 0,
+	      "two spellings of identical bytes resolve, they are not a choice");
+	/* But a genuine disagreement still refuses. */
+	CHECK(store_publish("twin-1.0-1-aarch64.tar.gz", digest_a) == STORE_OK,
+	      "now a different machine's build joins them");
+	CHECK(store_resolve("twin-1.0-1.tar.gz", got, sizeof(got)) == STORE_ERR_AMBIGUOUS,
+	      "and the bare name refuses again, because now the bytes differ");
+	CHECK(store_unpublish("twin-1.0-1-x86_64.tar.gz") == STORE_OK, "clean up");
+	CHECK(store_unpublish("twin-1.0-1-aarch64.tar.gz") == STORE_OK, "clean up");
+	CHECK(store_unpublish("twin-1.0-1.tar.gz") == STORE_OK, "clean up");
+
 	/* The stamp refuses a machine it does not know, rather than inventing it. */
 	CHECK(store_set_arch("pdp11", 1, &renamed, &conflicts) == -1,
 	      "an unknown architecture is refused");

@@ -523,8 +523,25 @@ enum store_error store_resolve_as(const char *name, char *out_digest, size_t out
 			continue;
 		if (resolve_path(path, found, sizeof(found)) != STORE_OK)
 			continue;
-		if (hits > 0)
-			return STORE_ERR_AMBIGUOUS;
+		if (hits > 0) {
+			/*
+			 * Two candidates are only ambiguous if they disagree
+			 * about the bytes. The same artifact published under two
+			 * spellings -- which happens when a store is stamped
+			 * after something was pushed bare, and the bare name was
+			 * pushed again afterwards -- offers no choice to get
+			 * wrong, so refusing it would be refusing to serve an
+			 * answer that is not in doubt.
+			 *
+			 * This mattered live: a zlib pushed both ways made its
+			 * bare name 409 for every host asking for it, which is a
+			 * hard failure rather than the harmless miss a host knows
+			 * how to survive.
+			 */
+			if (memcmp(hit_digest, found, STORE_SHA256_MAX) != 0)
+				return STORE_ERR_AMBIGUOUS;
+			continue;
+		}
 		hits++;
 		snprintf(hit_name, sizeof(hit_name), "%s", probe);
 		memcpy(hit_digest, found, sizeof(hit_digest));
