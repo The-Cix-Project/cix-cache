@@ -156,10 +156,9 @@ means retuning every component's padding and gaps at once, which is a
 larger and riskier change than a palette swap and wants to be done
 deliberately rather than folded into this.
 
-**`cixcachectl` is off the CLI grammar** (#11)**.** The verbs are fixed as of v2.15.0 — `list`, `publish`, `delete`, with the old
-spellings kept as aliases. The binary name still is not, and the naming section defines
-`cix <resource> <verb>` and says to prefer `cix package` over compact
-binary names except where technically necessary. The brand-correct form
-of this tool is `cix cache <verb>`, as a subcommand of the main CLI.
-That is a cross-repository change to `itdlabs/cix`, not something this
-repository can do alone.
+**`cixcachectl` was off the CLI grammar** (#11 — **fixed**). The verbs
+became `list`, `publish` and `delete` in v2.15.0, and the binary
+became `cix-cache` in v2.16.0, so `cix cache <verb>` finds it on PATH
+the way `git` finds `git-foo`. The old spellings and the old binary
+name all still work. The dispatch itself belongs to `itdlabs/cix` and
+is not this repository's to make.
