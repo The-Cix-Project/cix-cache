@@ -95,11 +95,11 @@ digest, the computed digest is compared against it and any disagreement is
 reported and the file left alone. That is the last moment the export's own
 record can be checked against its bytes.
 
-It can also be triggered over REST, which is what `cixcachectl import` does:
+It can also be triggered over REST, which is what `cix cache import` does:
 
 ```
-cixcachectl import --token=<push_token>
-cixcachectl import-status
+cix cache import --token=<push_token>
+cix cache import-status
 ```
 
 ## Canonicalizing names (required once, upgrading past v2.3.0)
@@ -124,7 +124,7 @@ updated keep hitting the cache instead of quietly rebuilding from
 source. Those hits are logged and counted:
 
 ```
-cixcachectl status | grep aliases       # should fall to zero over time
+cix cache status | grep aliases       # should fall to zero over time
 ```
 
 Skipping the migration is the one failure worth knowing about: an
@@ -165,28 +165,28 @@ the refusal lands before the body is uploaded:
 
 ```
 minisign -Sm cix-installer-2.2.0-1-x86_64.iso        # produces .iso.minisig
-cixcachectl publish cix-installer-2.2.0-1-x86_64.iso.minisig --token=<t> ...
-cixcachectl publish cix-installer-2.2.0-1-x86_64.iso     --token=<t> ...
+cix cache publish cix-installer-2.2.0-1-x86_64.iso.minisig --token=<t> ...
+cix cache publish cix-installer-2.2.0-1-x86_64.iso     --token=<t> ...
 ```
 
 Consumers verify with the pinned public key, on a trusted machine,
 **before** writing the stick. The key does not come from this server.
 
-`cixcachectl status` grows an `installers` line, and `list` a
+`cix cache status` grows an `installers` line, and `list` a
 `SIGNED` column, once there is an installer to report. Installers are counted
 apart from packages, matching `MANIFEST.json`'s two sections.
 
 ## Operating
 
 ```
-cixcachectl status                        # store and server summary
-cixcachectl list                          # every published artifact, paged
-cixcachectl log [-f]                      # what the server has been doing
-cixcachectl manifest                      # MANIFEST.json, generated live
-cixcachectl gc --dry-run                  # what collection would remove
-cixcachectl gc --token=<t>                # remove unreferenced blobs
-cixcachectl delete NAME --token=<t>       # unpublish a name
-cixcachectl publish FILE --name=N --sha256=H --token=<t>
+cix cache status                        # store and server summary
+cix cache list                          # every published artifact, paged
+cix cache log [-f]                      # what the server has been doing
+cix cache manifest                      # MANIFEST.json, generated live
+cix cache gc --dry-run                  # what collection would remove
+cix cache gc --token=<t>                # remove unreferenced blobs
+cix cache delete NAME --token=<t>       # unpublish a name
+cix cache publish FILE --name=N --sha256=H --token=<t>
 ```
 
 Verbs follow the Cix CLI grammar: `list`, `publish`, `delete`. The

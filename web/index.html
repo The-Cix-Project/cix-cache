@@ -265,7 +265,7 @@ curl -fsSLO http://&lt;host&gt;:8080/cix-installer-2.2.0-1-x86_64.iso.minisig
 minisign -Vm cix-installer-2.2.0-1-x86_64.iso -p cix.pub</code></pre>
 		<p class="note">
 			An ISO is counted apart from packages &mdash; the menu bar grows an
-			<code>installers</code> figure, and so does <code>cixcachectl status</code>, both only
+			<code>installers</code> figure, and so does <code>cix cache status</code>, both only
 			once there is one. An ISO is not a package: nothing resolves it by
 			<code>name@version</code> and no recipe stands behind it, so folding it into the
 			package count would make that number mean two kinds of thing.
@@ -291,7 +291,8 @@ minisign -Vm cix-installer-2.2.0-1-x86_64.iso -p cix.pub</code></pre>
 		<p class="note">Anything marked <span class="tag warn">POST</span> needs the push token.</p>
 
 		<h2 id="help-cli">Command line</h2>
-		<pre><code>cixcachectl [--host=H] [--port=N] [--json] &lt;command&gt;
+		<pre><code>cix cache [--host=H] [--port=N] [--json] &lt;command&gt;
+   or: cix-cache [...] &lt;command&gt;        (what cix dispatches to)
 
   status                     server and store summary
   list                       every published artifact, paged
@@ -305,7 +306,16 @@ minisign -Vm cix-installer-2.2.0-1-x86_64.iso -p cix.pub</code></pre>
   publish FILE --name=N --sha256=H [--token=]
   delete NAME [--token=]
 
-  ls, put and rm still work, as aliases.</code></pre>
+  ls, put and rm still work, as aliases.
+  cixcachectl still works too, as the tool's former name.</code></pre>
+		<p>
+			The tool is <code>cix-cache</code>, which <code>cix</code> finds on
+			<code>PATH</code> the way <code>git</code> finds <code>git-foo</code> &mdash; so
+			<code>cix cache status</code> and <code>cix-cache status</code> are the same
+			thing. Its former name <code>cixcachectl</code> is installed as a symlink and
+			keeps working; run interactively it says once where it moved, and says nothing
+			at all when its output is piped.
+		</p>
 		<p>
 			Verbs are plain English, per the Cix CLI grammar: <code>list</code>,
 			<code>publish</code>, <code>delete</code>. The older <code>ls</code>,

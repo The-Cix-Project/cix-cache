@@ -4,7 +4,7 @@
 unmodified Cix host already requests, so a new box can install packages
 instead of rebuilding them from source.
 
-It ships with `cixcachectl` (a REST client) and a web dashboard.
+It ships with `cix cache` (a REST client) and a web dashboard.
 
 ```
 build/cixcached --root=cache --bind=0.0.0.0 --port=8080
@@ -139,7 +139,7 @@ while being stored in a directory of their own.
 TCC only, dynamically linked against system glibc:
 
 ```
-make          # cixcached, cixcachectl, and the tests
+make          # cixcached, cix-cache, and the tests
 make clean
 ```
 

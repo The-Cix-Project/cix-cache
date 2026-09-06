@@ -6,6 +6,13 @@ packages, so a whole-rootfs artifact duplicated bytes the package tier
 already held (ADR-0006). Everything below about the package tier, the
 two-URL split and the trust model stands unchanged.
 
+The client binary named below was renamed to `cix-cache` in v2.16.0, so
+that `cix cache <verb>` finds it on PATH the way `git` finds `git-foo`
+(#11). `cixcachectl` remains as a symlink. The body of this document is
+left as written -- it records the reasoning that produced the system,
+and rewriting it to match today would destroy the thing it exists to
+preserve.
+
 **Originally:** built. `cixcached`, `cixcachectl` and the dashboard implement
 this design; the hand-made static export it describes has been migrated
 into the content-addressed store. The decisions taken while implementing

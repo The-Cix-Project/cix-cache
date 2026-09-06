@@ -391,7 +391,7 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 	}
 	if (path == NULL || name == NULL || digest == NULL) {
 		fprintf(stderr,
-		        "usage: cixcachectl publish FILE --name=NAME.tar.gz "
+		        "usage: cix cache publish FILE --name=NAME.tar.gz "
 		        "--sha256=HEX [--token=TOK]\n");
 		return 2;
 	}
@@ -526,7 +526,8 @@ static int is_cmd(const char *cmd, const char *name, const char *alias)
 static void usage(FILE *out)
 {
 	fprintf(out,
-	        "usage: cixcachectl [--host=H] [--port=N] [--json] <command>\n"
+	        "usage: cix cache [--host=H] [--port=N] [--json] <command>\n"
+	        "   or: cix-cache [...] <command>        (what cix dispatches to)\n"
 	        "\n"
 	        "  status                     server and store summary\n"
 	        "  list                       every published artifact\n"
@@ -538,7 +539,8 @@ static void usage(FILE *out)
 	        "  publish FILE --name=N --sha256=H [--token=]\n"
 	        "  delete NAME [--token=]\n"
 	        "\n"
-	        "  ls, put and rm still work, as aliases for list, publish and delete.\n");
+	        "  ls, put and rm still work, as aliases for list, publish and delete.\n"
+	        "  cixcachectl still works too, as the tool's former name.\n");
 }
 
 static int dispatch_command(const struct cix_client *c, int json_mode, const char *cmd, int argc,
@@ -589,15 +591,34 @@ static int dispatch_command(const struct cix_client *c, int json_mode, const cha
 		char path[600];
 
 		if (argc < 1 || argv[0][0] == '-') {
-			fprintf(stderr, "usage: cixcachectl delete NAME [--token=TOK]\n");
+			fprintf(stderr, "usage: cix cache delete NAME [--token=TOK]\n");
 			return 2;
 		}
 		snprintf(path, sizeof(path), "/%s", argv[0]);
 		return one_call(c, json_mode, "DELETE", path, token, fmt_removed, 0);
 	}
-	fprintf(stderr, "cixcachectl: unknown command '%s'\n", cmd);
+	fprintf(stderr, "cix cache: unknown command '%s'\n", cmd);
 	usage(stderr);
 	return 2;
+}
+
+/*
+ * Invoked as cixcachectl rather than cix-cache. Say so once, and only
+ * to a terminal: a script's stderr must stay clean, and a note nobody
+ * asked for is exactly the kind of thing that ends up parsed by
+ * accident.
+ */
+static void note_old_name(const char *argv0)
+{
+	const char *base = strrchr(argv0, '/');
+
+	base = base != NULL ? base + 1 : argv0;
+	if (strcmp(base, "cixcachectl") != 0)
+		return;
+	if (!isatty(STDERR_FILENO))
+		return;
+	fprintf(stderr, "note: cixcachectl is now `cix cache` (or cix-cache); "
+	                "this name still works.\n");
 }
 
 int main(int argc, char **argv)
@@ -608,6 +629,8 @@ int main(int argc, char **argv)
 	int json_mode = 0;
 	const char *cmd;
 	int i = 1;
+
+	note_old_name(argv[0]);
 
 	while (i < argc && strncmp(argv[i], "--", 2) == 0) {
 		if (strncmp(argv[i], "--host=", 7) == 0)

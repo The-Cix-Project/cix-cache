@@ -28,7 +28,7 @@ PREFIX := /opt/cixcache
 
 .PHONY: all clean install
 
-all: $(BUILD)/cixcached $(BUILD)/cixcachectl $(TESTS)
+all: $(BUILD)/cixcached $(BUILD)/cix-cache $(TESTS)
 
 $(BUILD):
 	mkdir -p $(BUILD)
@@ -51,7 +51,7 @@ $(BUILD)/version.h: | $(BUILD)
 $(BUILD)/cixcached: src/main.c $(SERVER_SRCS) $(BUILD)/version.h | $(BUILD)
 	$(CC) $(CFLAGS) src/main.c $(SERVER_SRCS) -o $@
 
-$(BUILD)/cixcachectl: cli/src/main.c $(CLIENT_SRCS) $(BUILD)/version.h | $(BUILD)
+$(BUILD)/cix-cache: cli/src/main.c $(CLIENT_SRCS) $(BUILD)/version.h | $(BUILD)
 	$(CC) $(CLIENT_CFLAGS) cli/src/main.c $(CLIENT_SRCS) -o $@
 
 $(BUILD)/test_store: test/test_store.c src/store.c | $(BUILD)
@@ -88,10 +88,14 @@ $(BUILD)/test_gc: test/test_gc.c | $(BUILD)
 # a config holds a token, and reinstalling a binary must never overwrite
 # either.
 #
-install: $(BUILD)/cixcached $(BUILD)/cixcachectl
+install: $(BUILD)/cixcached $(BUILD)/cix-cache
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(PREFIX)/share/web $(DESTDIR)$(PREFIX)/etc
 	install -m 0755 $(BUILD)/cixcached $(DESTDIR)$(PREFIX)/bin/cixcached
-	install -m 0755 $(BUILD)/cixcachectl $(DESTDIR)$(PREFIX)/bin/cixcachectl
+	install -m 0755 $(BUILD)/cix-cache $(DESTDIR)$(PREFIX)/bin/cix-cache
+	# The old name keeps working, as a symlink rather than a second copy.
+	# `cix cache <verb>` finds cix-cache on PATH the way git finds git-foo,
+	# so the binary has to carry that name; nothing about the tool changed.
+	ln -sf cix-cache $(DESTDIR)$(PREFIX)/bin/cixcachectl
 	install -m 0644 web/index.html web/app.js web/style.css web/favicon.svg web/InterVariable.woff2 $(DESTDIR)$(PREFIX)/share/web/
 	@echo "installed to $(DESTDIR)$(PREFIX)"
 
