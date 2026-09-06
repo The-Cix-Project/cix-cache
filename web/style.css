@@ -49,6 +49,26 @@
  * gives directly: never generate light mode by inverting dark.
  */
 :root {
+	/*
+	 * Spacing, on the brand system's 8px base with 4px half-steps
+	 * (Brand Guidelines v1.0, Grid, spacing and composition). Named
+	 * steps rather than literals, for the same reason the colours are
+	 * named: the palette swap was a contained change precisely because
+	 * every value lived in one place, and spacing had drifted to 29
+	 * distinct values -- 0.85rem, 0.28rem, 0.15rem -- each nudged until
+	 * a component looked right, which is the practice the guidelines
+	 * name outright.
+	 */
+	--space-1: 0.25rem;   /*  4px  fine internal gap, optical correction */
+	--space-2: 0.5rem;    /*  8px  base inline gap */
+	--space-3: 0.75rem;   /* 12px  half-step, where 16 is too loose */
+	--space-4: 1rem;      /* 16px  standard component padding */
+	--space-5: 1.5rem;    /* 24px  related content separation */
+	--space-6: 2rem;      /* 32px  section separation */
+	--space-7: 3rem;      /* 48px  large content group */
+	--space-8: 4rem;      /* 64px  major section boundary */
+	--space-9: 6rem;      /* 96px  editorial whitespace */
+
 	color-scheme: light dark;
 	--bg: #f3f0e7;         /* Paper */
 	--panel: #ffffff;      /* white, which the brand allows for system-native surfaces */
@@ -162,8 +182,8 @@ body {
 header {
 	display: flex;
 	align-items: center;
-	gap: 1rem;
-	padding: 0 0.85rem;
+	gap: var(--space-4);
+	padding: 0 var(--space-3);
 	height: 2.6rem;
 	background: var(--panel);
 	border-bottom: 1px solid var(--border);
@@ -188,7 +208,7 @@ button {
 	background: var(--panel);
 	border: 1px solid var(--border);
 	border-radius: 6px;
-	padding: 0.28rem 0.7rem;
+	padding: var(--space-1) var(--space-3);
 	cursor: pointer;
 }
 
@@ -205,7 +225,7 @@ button:disabled {
 button.icon {
 	border: none;
 	background: none;
-	padding: 0.25rem;
+	padding: var(--space-1);
 	line-height: 0;
 	border-radius: 6px;
 	color: var(--muted);
@@ -230,7 +250,7 @@ button.subtle {
 	border: none;
 	background: none;
 	color: var(--muted);
-	padding: 0.15rem 0.4rem;
+	padding: var(--space-1) var(--space-2);
 }
 
 button.subtle:hover {
@@ -244,7 +264,7 @@ main {
 	overflow-y: auto;
 	display: flex;
 	flex-direction: column;
-	padding: 0 1rem;
+	padding: 0 var(--space-4);
 }
 
 /*
@@ -271,7 +291,7 @@ main[hidden] {
 	 * this one is a large mark over progressively lighter text; the
 	 * bias puts the search box near the optical centre instead.
 	 */
-	padding: 1.5rem 0 clamp(2rem, 9vh, 7rem);
+	padding: var(--space-5) 0 clamp(var(--space-6), 9vh, 7rem);
 }
 
 /*
@@ -305,7 +325,7 @@ main[hidden] {
  * appropriately as the size grows.
  */
 .wordmark {
-	margin: 0 0 1.6rem;
+	margin: 0 0 var(--space-5);
 	text-align: center;
 	font-size: clamp(2.4rem, 7vw, 3.6rem);
 	font-weight: 700;
@@ -331,7 +351,7 @@ main[hidden] {
 	}
 
 	.wordmark {
-		margin-bottom: 1.1rem;
+		margin-bottom: var(--space-4);
 	}
 }
 
@@ -344,7 +364,7 @@ main[hidden] {
 	display: flex;
 	align-items: center;
 	flex: none;
-	margin-right: 0.15rem;
+	margin-right: var(--space-1);
 	color: var(--text);
 	text-decoration: none;
 }
@@ -383,11 +403,11 @@ main[hidden] {
 .search-box {
 	display: flex;
 	align-items: center;
-	gap: 0.6rem;
+	gap: var(--space-2);
 	background: var(--panel);
 	border: 1px solid var(--border);
 	border-radius: 999px;
-	padding: 0.55rem 1rem;
+	padding: var(--space-2) var(--space-4);
 	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
@@ -413,7 +433,7 @@ main[hidden] {
 	color: var(--text);
 	font: inherit;
 	font-size: 1rem;
-	padding: 0.15rem 0;
+	padding: var(--space-1) 0;
 }
 
 #q:focus {
@@ -428,13 +448,13 @@ main[hidden] {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	gap: 0.4rem;
-	margin: 0.85rem 0 0;
+	gap: var(--space-2);
+	margin: var(--space-3) 0 0;
 }
 
 .chip {
 	font-size: 0.75rem;
-	padding: 0.15rem 0.6rem;
+	padding: var(--space-1) var(--space-2);
 	border-radius: 999px;
 	color: var(--muted);
 }
@@ -442,7 +462,7 @@ main[hidden] {
 .arch-chips {
 	display: flex;
 	align-items: center;
-	gap: 0.4rem;
+	gap: var(--space-2);
 }
 
 /*
@@ -464,7 +484,7 @@ main[hidden] {
 /* Results drop beneath the box, as a floating sheet rather than a
  * section of the page -- the search is the subject, not the table. */
 .results {
-	margin-top: 0.8rem;
+	margin-top: var(--space-3);
 	background: var(--panel);
 	border: 1px solid var(--border);
 	border-radius: 10px;
@@ -491,7 +511,7 @@ th {
 	text-align: left;
 	font-weight: 600;
 	color: var(--muted);
-	padding: 0.45rem 0.9rem;
+	padding: var(--space-2) var(--space-4);
 	border-bottom: 1px solid var(--border);
 	white-space: nowrap;
 	font-size: 0.7rem;
@@ -500,7 +520,7 @@ th {
 }
 
 td {
-	padding: 0.38rem 0.9rem;
+	padding: var(--space-2) var(--space-4);
 	border-bottom: 1px solid var(--border);
 	white-space: nowrap;
 }
@@ -547,19 +567,19 @@ a:hover {
 .results-foot {
 	display: flex;
 	align-items: center;
-	gap: 0.4rem;
-	padding: 0.45rem 0.7rem;
+	gap: var(--space-2);
+	padding: var(--space-2) var(--space-3);
 	border-top: 1px solid var(--border);
 	font-size: 0.75rem;
 }
 
 .results-foot button {
 	font-size: 0.75rem;
-	padding: 0.15rem 0.55rem;
+	padding: var(--space-1) var(--space-2);
 }
 
 .empty {
-	padding: 1.4rem 0.9rem;
+	padding: var(--space-5) var(--space-4);
 	color: var(--muted);
 	text-align: center;
 }
@@ -567,7 +587,7 @@ a:hover {
 .hint {
 	color: var(--muted);
 	font-size: 0.75rem;
-	margin: 1.3rem auto 0;
+	margin: var(--space-5) auto 0;
 	max-width: 46rem;
 	text-align: center;
 	line-height: 1.6;
@@ -593,13 +613,13 @@ a:hover {
 .help-nav {
 	flex: none;
 	width: 13rem;
-	padding: 1.4rem 0.9rem;
+	padding: var(--space-5) var(--space-4);
 	border-right: 1px solid var(--border);
 	background: var(--panel);
 	overflow-y: auto;
 	display: flex;
 	flex-direction: column;
-	gap: 0.15rem;
+	gap: var(--space-1);
 }
 
 .help-title {
@@ -608,12 +628,12 @@ a:hover {
 	text-transform: uppercase;
 	letter-spacing: 0.06em;
 	color: var(--muted);
-	margin-bottom: 0.5rem;
+	margin-bottom: var(--space-2);
 }
 
 .help-nav a {
 	color: var(--text);
-	padding: 0.28rem 0.5rem;
+	padding: var(--space-1) var(--space-2);
 	border-radius: 6px;
 	font-size: 0.8rem;
 	text-decoration: none;
@@ -633,7 +653,7 @@ a:hover {
 .help-body {
 	flex: 1;
 	overflow-y: auto;
-	padding: 1.6rem 2rem 6rem;
+	padding: var(--space-5) var(--space-6) var(--space-9);
 	scroll-behavior: smooth;
 }
 
@@ -645,8 +665,8 @@ a:hover {
 	font-size: 1.05rem;
 	font-weight: 600;
 	letter-spacing: -0.01em;
-	margin: 2.2rem 0 0.7rem;
-	padding-top: 0.4rem;
+	margin: var(--space-6) 0 var(--space-3);
+	padding-top: var(--space-2);
 }
 
 .help-body h2:first-child {
@@ -654,7 +674,7 @@ a:hover {
 }
 
 .help-body p {
-	margin: 0.6rem 0;
+	margin: var(--space-2) 0;
 	line-height: 1.65;
 }
 
@@ -663,16 +683,16 @@ a:hover {
 	font-size: 0.78rem;
 	background: var(--row-alt);
 	border-radius: 4px;
-	padding: 0.05rem 0.3rem;
+	padding: 0 var(--space-1);
 }
 
 .help-body pre {
 	background: var(--panel);
 	border: 1px solid var(--border);
 	border-radius: 8px;
-	padding: 0.75rem 0.9rem;
+	padding: var(--space-3) var(--space-4);
 	overflow-x: auto;
-	margin: 0.8rem 0;
+	margin: var(--space-3) 0;
 }
 
 .help-body pre code {
@@ -683,7 +703,7 @@ a:hover {
 }
 
 .help-table {
-	margin: 0.8rem 0;
+	margin: var(--space-3) 0;
 	border: 1px solid var(--border);
 	border-radius: 8px;
 	overflow: hidden;
@@ -691,7 +711,7 @@ a:hover {
 }
 
 .help-table td {
-	padding: 0.4rem 0.75rem;
+	padding: var(--space-2) var(--space-3);
 	border-bottom: 1px solid var(--border);
 	white-space: normal;
 	vertical-align: top;
@@ -711,7 +731,7 @@ a:hover {
 	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 	font-size: 0.68rem;
 	font-weight: 600;
-	padding: 0.05rem 0.4rem;
+	padding: 0 var(--space-2);
 	border-radius: 4px;
 	border: 1px solid currentColor;
 	color: var(--muted);
@@ -727,7 +747,7 @@ a:hover {
 
 .help-body .note {
 	border-left: 2px solid var(--accent);
-	padding-left: 0.8rem;
+	padding-left: var(--space-3);
 	color: var(--muted);
 	font-size: 0.8rem;
 }
@@ -744,14 +764,14 @@ a:hover {
 	border: 1px solid var(--border);
 	border-radius: 10px;
 	box-shadow: var(--shadow);
-	padding: 0.8rem;
+	padding: var(--space-3);
 }
 
 .popover label {
 	display: block;
 	font-size: 0.72rem;
 	color: var(--muted);
-	margin-bottom: 0.25rem;
+	margin-bottom: var(--space-1);
 }
 
 .popover input {
@@ -761,7 +781,7 @@ a:hover {
 	background: var(--bg);
 	border: 1px solid var(--border);
 	border-radius: 6px;
-	padding: 0.3rem 0.55rem;
+	padding: var(--space-1) var(--space-2);
 }
 
 .popover input:focus {
@@ -772,8 +792,8 @@ a:hover {
 .popover-actions {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 0.4rem;
-	margin-top: 0.6rem;
+	gap: var(--space-2);
+	margin-top: var(--space-2);
 }
 
 .popover-actions button {
@@ -781,7 +801,7 @@ a:hover {
 }
 
 .popover p {
-	margin: 0.6rem 0 0;
+	margin: var(--space-2) 0 0;
 	font-size: 0.72rem;
 }
 
@@ -796,13 +816,18 @@ a:hover {
 }
 
 /*
- * Grab strip on the dock's top edge. Sits slightly over the border so
- * the target is easier to hit than the 1px line it appears to be.
+ * Grab strip on the dock's top edge. Sits over the border so the
+ * target is easier to hit than the 1px line it appears to be.
+ *
+ * The three numbers are load-bearing and must keep summing to zero:
+ * the strip is 8px tall and pulled 4px up and 4px down, so it costs no
+ * layout height while still presenting a real target. It was 7/-4/-3,
+ * which summed the same way but put a 3px value on nothing.
  */
 .log-resize {
-	height: 7px;
+	height: 8px;
 	margin-top: -4px;
-	margin-bottom: -3px;
+	margin-bottom: -4px;
 	flex: none;
 	cursor: ns-resize;
 	background: transparent;
@@ -831,8 +856,8 @@ body.resizing {
 .logdock-bar {
 	display: flex;
 	align-items: center;
-	gap: 0.6rem;
-	padding: 0.25rem 0.85rem;
+	gap: var(--space-2);
+	padding: var(--space-1) var(--space-3);
 	font-size: 0.75rem;
 	flex: none;
 }
@@ -840,11 +865,11 @@ body.resizing {
 .log-toggle {
 	display: flex;
 	align-items: center;
-	gap: 0.35rem;
+	gap: var(--space-1);
 	border: none;
 	background: none;
 	color: var(--text);
-	padding: 0.15rem 0;
+	padding: var(--space-1) 0;
 	font-size: 0.75rem;
 	font-weight: 600;
 }
@@ -873,7 +898,7 @@ body.resizing {
 	height: 14rem;
 	max-height: 70vh;
 	overflow-y: auto;
-	padding: 0.25rem 0.85rem 0.6rem;
+	padding: var(--space-1) var(--space-3) var(--space-2);
 	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 	font-size: 0.72rem;
 	line-height: 1.55;
@@ -898,9 +923,9 @@ footer {
 	flex: none;
 	display: flex;
 	align-items: center;
-	gap: 0.5rem;
+	gap: var(--space-2);
 	height: 1.7rem;
-	padding: 0 0.85rem;
+	padding: 0 var(--space-3);
 	background: var(--panel);
 	border-top: 1px solid var(--border);
 	color: var(--muted);
@@ -920,7 +945,7 @@ footer {
 .led-group {
 	display: flex;
 	align-items: center;
-	gap: 0.3rem;
+	gap: var(--space-1);
 }
 
 /* Idle is the same lamp at rest -- dimmed, not a different colour, so a
