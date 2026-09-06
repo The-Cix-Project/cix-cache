@@ -148,7 +148,8 @@ honouring the preference costs nothing.
 
 ### Known divergences, deliberately not fixed here
 
-**Spacing is not on the 8px grid** (#10)**.** The composition section requires an
+**Spacing was not on the 8px grid** (#10 — **fixed in v2.14.0**; nine
+named steps, no value off the grid)**.** The composition section requires an
 8px base with 4px half-steps and says not to use arbitrary values. This
 stylesheet is full of them — `0.28rem`, `0.85rem`, `1.4rem`. Fixing it
 means retuning every component's padding and gaps at once, which is a
