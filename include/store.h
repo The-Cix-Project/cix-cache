@@ -11,7 +11,13 @@
  *
  *   <root>/blobs/<sha256>                    real bytes, mode 0444
  *   <root>/packages/<name>-<ver>-<rel>-<arch>.tar.gz  -> ../blobs/<sha256>
+ *   <root>/packages/<name>-<ver>-<rel>-<arch>.cixpkg  -> ../blobs/<sha256>
  *   <root>/tmp/                              upload staging, same fs
+ *
+ * One flat directory whatever the suffix: an installer, a package in
+ * either encoding and any of their signatures are all published names
+ * side by side, and which tier a name belongs to is a property of its
+ * suffix rather than of where it sits.
  *
  * The published entries are symlinks, and that is the whole point: the
  * link target IS the digest, so resolving a name to its checksum and

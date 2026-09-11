@@ -8,10 +8,19 @@ two-URL split and the trust model stands unchanged.
 
 The client binary named below was renamed to `cix-cache` in v2.16.0, so
 that `cix cache <verb>` finds it on PATH the way `git` finds `git-foo`
-(#11). `cixcachectl` remains as a symlink. The body of this document is
-left as written -- it records the reasoning that produced the system,
-and rewriting it to match today would destroy the thing it exists to
-preserve.
+(#11). `cixcachectl` remains as a symlink.
+
+`.tar.gz` is no longer the only package encoding: `.cixpkg` is
+recognised too, since Cix is adopting it as its package format
+(cix-build-system#141), and both can exist for one artifact while that
+migration runs. The listing groups by artifact rather than by file as a
+result, and whether an unsigned publish is refused is configuration
+rather than a fixed rule about ISOs (ADR-0012). The URL shapes below
+are unchanged; there are simply more suffixes that fit them.
+
+The body of this document is left as written -- it records the
+reasoning that produced the system, and rewriting it to match today
+would destroy the thing it exists to preserve.
 
 **Originally:** built. `cixcached`, `cixcachectl` and the dashboard implement
 this design; the hand-made static export it describes has been migrated

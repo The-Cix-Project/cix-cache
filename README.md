@@ -14,7 +14,7 @@ build/cixcached --root=cache --bind=0.0.0.0 --port=8080
 
 | Purpose | Request |
 |---|---|
-| artifact | `GET <base>/<name>-<version>-<release>-<arch>.tar.gz` |
+| artifact | `GET <base>/<name>-<version>-<release>-<arch>.tar.gz` (or `.cixpkg`) |
 | installer | `GET <base>/<name>-<version>-<release>-<arch>.iso` (+ `.iso.minisig`) |
 | publish | `PUT`, with `X-Cix-Sha256` |
 | existence probe | `HEAD` |
@@ -31,10 +31,16 @@ The store holds several revisions of most packages, so a count of
 packages and a count of published artifacts are different facts and both
 are reported.
 Artifact paths are the only ones ending in a suffix the store
-recognises, which today means `.tar.gz` and nothing else, so the two
-namespaces cannot collide. The suffixes live in one table
-(`store_suffix_of()`) rather than being spelled out at each site that
-needs to strip one.
+recognises — `.tar.gz`, `.cixpkg`, `.iso`, and a `.minisig` of any of
+them — so the two namespaces cannot collide. The suffixes live in one
+table rather than being spelled out at each site that needs to strip
+one, and that table carries what the store knows about each: the tier
+it belongs to, and whether it may be published unsigned.
+
+`.cixpkg` is the format Cix is moving to (cix-build-system#141). Both
+encodings of an artifact can exist at once during that migration, which
+is why a listing row is an *artifact* carrying its formats rather than
+a file. See `docs/adr/0012-cixpkg-and-signature-policy.md`.
 
 ## Artifact names
 
@@ -80,13 +86,23 @@ always kept them in separate sections: an ISO is not resolved by
 "N packages".
 
 An unsigned ISO is refused, because an ISO is fetched by a person and
-booted with no recipe checksum vouching for it. **Verify before writing
+booted with no recipe checksum vouching for it. Which suffixes are
+refused unsigned is the `require_signature` setting, `.iso` by default;
+a store can be told to demand one for packages too. It does not change
+which tier an artifact is in — a signed package is still a package. **Verify before writing
 the stick, on a machine you already trust** — the signature must be
 checked by something other than the thing being checked, and an
 installer validating itself proves nothing. See
 `docs/adr/0010-installer-isos-are-served-and-signed.md`.
 
 ## Reading a listing
+
+A row is one **artifact**, not one file. Where an artifact exists in
+more than one encoding — a `.tar.gz` and a `.cixpkg` of the same
+identity — it is one row listing both, because a format change is not a
+new artifact. So `count` and `files` in `/api/v1/artifacts` are
+different numbers, and a Format column appears only once something
+actually holds two.
 
 Listings come back **most recently published first**, so the front page
 answers "what landed". Columns are sortable when you want a different
@@ -125,6 +141,7 @@ binaries they validate. See `docs/adr/0002-registry-is-a-cache-not-a-catalogue.m
 cache/
   blobs/<sha256>                    the bytes, mode 0444
   packages/<name>-<ver>-<rel>-<arch>.tar.gz  -> ../blobs/<sha256>
+  packages/<name>-<ver>-<rel>-<arch>.cixpkg  -> ../blobs/<sha256>
   tmp/                              upload staging
 ```
 
@@ -147,7 +164,7 @@ Tests are standalone binaries run by hand, against a real server on a
 dedicated port:
 
 ```
-for t in store http manifest import serve push gc; do build/test_$t; done
+for t in store http conf manifest import serve push gc; do build/test_$t; done
 ```
 
 ## Documentation

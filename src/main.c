@@ -735,17 +735,18 @@ static void begin_upload(struct conn *cc, const struct http_request *req, const 
 		return;
 	}
 	/*
-	 * A bootable may not be published unsigned. Checked here, before
-	 * any of the body is staged, so refusing costs the pusher a header
-	 * exchange rather than uploading a multi-gigabyte ISO to be told
-	 * no at the end.
+	 * Some suffixes may not be published unsigned -- a bootable by
+	 * default, and whatever else require_signature names (#15).
+	 * Checked here, before any of the body is staged, so refusing
+	 * costs the pusher a header exchange rather than uploading a
+	 * multi-gigabyte ISO to be told no at the end.
 	 *
 	 * The signature has to exist first, which is the only order that
-	 * satisfies the rule: it is made over the ISO's digest and can be
-	 * produced before either is uploaded. Note this is a rule about
-	 * ACCEPTING, not about maintaining -- the store declines to take
-	 * an unsigned bootable, but does not promise one stays signed, so
-	 * it stays consistent with deletes being uncoupled.
+	 * satisfies the rule: it is made over the artifact's digest and
+	 * can be produced before either is uploaded. Note this is a rule
+	 * about ACCEPTING, not about maintaining -- the store declines to
+	 * take an unsigned artifact, but does not promise one stays
+	 * signed, so it stays consistent with deletes being uncoupled.
 	 */
 	if (store_needs_signature(name)) {
 		char sig[STORE_NAME_MAX];
@@ -1613,9 +1614,12 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 	is_head = strcmp(req->method, "HEAD") == 0;
 
 	/*
-	 * Artifact paths are the only ones that end .tar.gz, so the
-	 * machine-facing namespace and the operator-facing one cannot
-	 * collide however the store is filled.
+	 * Artifact paths are the only ones ending in a suffix the store
+	 * recognises, so the machine-facing namespace and the
+	 * operator-facing one cannot collide however the store is filled.
+	 * Said as "the only ones that end .tar.gz" while that was the only
+	 * suffix there was -- which stopped being true at .iso and is
+	 * further from true at .cixpkg.
 	 */
 	if (is_artifact_path(path)) {
 		const char *name = path + 1;

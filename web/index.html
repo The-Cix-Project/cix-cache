@@ -214,17 +214,26 @@ cixctl --host=&lt;box&gt; pkg sync</code></pre>
 			<code>2.1.10</code> follows <code>2.1.8</code> and <code>v2.2.0-rc6</code> comes
 			<em>before</em> <code>v2.2.0</code>.
 		</p>
+		<p>
+			A row is one <b>artifact</b>, not one file. An artifact published in more than
+			one encoding &mdash; a <code>.tar.gz</code> and a <code>.cixpkg</code> of the
+			same identity &mdash; is one row listing both, because a format change is not a
+			new artifact. Size and checksum are per encoding and stack in line with the
+			format they belong to, and each format links to its own URL.
+		</p>
 		<p class="note">
-			Two columns appear only when they tell rows apart: <code>Arch</code>, and the
-			architecture chips under the search box. While the store holds one architecture
-			there is nothing to choose between, and a filter with a single option filters
-			nothing.
+			Columns appear only when they tell rows apart: <code>Format</code> once
+			something holds more than one encoding, <code>Arch</code> once two artifacts
+			differ by architecture, <code>Signed</code> once something in view carries a
+			signature &mdash; and likewise the architecture chips under the search box. A
+			column repeating one value costs width and teaches nothing, and a filter with a
+			single option filters nothing.
 		</p>
 
 		<h2 id="help-fetch">Fetching artifacts</h2>
 		<p>Every artifact lives at the root of the base URL. There is no other path shape.</p>
 		<table class="help-table">
-			<tr><td><span class="tag">GET</span></td><td><code>/&lt;name&gt;-&lt;version&gt;-&lt;release&gt;-&lt;arch&gt;.tar.gz</code></td><td>the artifact</td></tr>
+			<tr><td><span class="tag">GET</span></td><td><code>/&lt;name&gt;-&lt;version&gt;-&lt;release&gt;-&lt;arch&gt;.tar.gz</code></td><td>the artifact &mdash; also <code>.cixpkg</code>, <code>.iso</code>, or a <code>.minisig</code> of any of them</td></tr>
 			<tr><td><span class="tag">HEAD</span></td><td><code>/&lt;name&gt;-&lt;version&gt;-&lt;release&gt;-&lt;arch&gt;.tar.gz</code></td><td>size and digest, no body</td></tr>
 		</table>
 		<pre><code>curl -fsSL http://&lt;host&gt;:8080/bc-1.08.1-2.tar.gz | sha256sum

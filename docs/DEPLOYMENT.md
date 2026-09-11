@@ -222,6 +222,13 @@ first, and grows an architecture column only once two artifacts differ
 by one. `status` grows an `unstamped` line only when there is something
 to stamp.
 
+A line is one artifact rather than one file. An artifact published in
+more than one encoding — a `.tar.gz` and a `.cixpkg` of the same
+identity — gets a Format column and one line per encoding, with the
+artifact, version and release columns filled in on the first only. The
+footer then reads "N artifacts in M files"; while every artifact has a
+single encoding the two numbers are equal and it says neither twice.
+
 `HEAD` works on artifacts — it returns the size and `X-Cix-Sha256`
 without re-reading the file, which is how to check what is already
 published before pushing over it — and on dashboard assets.
