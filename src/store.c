@@ -104,7 +104,8 @@ int store_digest_is_valid(const char *s)
  * ends with, or ".iso.minisig" would be read as a ".minisig" whose stem
  * still carries ".iso".
  */
-static const char *const g_suffixes[] = { ".tar.gz.minisig", ".iso.minisig", ".tar.gz",
+static const char *const g_suffixes[] = { ".tar.gz.minisig", ".cixpkg.minisig",
+                                         ".iso.minisig", ".tar.gz", ".cixpkg",
                                          ".iso", NULL };
 
 const char *store_suffix_of(const char *name)

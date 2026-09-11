@@ -805,6 +805,82 @@ static void test_signatures(void)
 	      "and so does its signature, to the matching name");
 }
 
+/*
+ * CIXPKG recognition (#13).
+ *
+ * The whole of the change is two entries in the suffix table, and the
+ * point of this test is everything that follows from them without a
+ * line of its own: a .cixpkg is a valid published name, its stem
+ * parses exactly as its .tar.gz counterpart's does, it types as a
+ * package rather than an installer, and its signature composes the way
+ * any other artifact's does. If any of that had needed special-casing,
+ * the table would have been the wrong place to make the change.
+ */
+static void test_cixpkg(void)
+{
+	char out[STORE_NAME_MAX];
+	char pn[STORE_NAME_MAX];
+	char pv[STORE_NAME_MAX];
+	char pa[64];
+	char cn[STORE_NAME_MAX];
+	char cv[STORE_NAME_MAX];
+	char ca[64];
+	int pr = 0;
+	int cr = 0;
+
+	CHECK(store_suffix_of("zstd-1.5.7-3-x86_64.cixpkg") != NULL &&
+	              strcmp(store_suffix_of("zstd-1.5.7-3-x86_64.cixpkg"), ".cixpkg") == 0,
+	      "a .cixpkg is a recognised artifact");
+	CHECK(store_name_is_valid("zstd-1.5.7-3-x86_64.cixpkg"),
+	      "and so is publishable -- before this it was not a name at all");
+
+	/*
+	 * The same stem trap as .tar.gz.minisig: registering the compound
+	 * after the base, or not at all, would leave ".cixpkg" inside the
+	 * stem and every consumer downstream would read "cixpkg" as part
+	 * of the architecture.
+	 */
+	CHECK(store_suffix_of("zstd-1.5.7-3-x86_64.cixpkg.minisig") != NULL &&
+	              strcmp(store_suffix_of("zstd-1.5.7-3-x86_64.cixpkg.minisig"),
+	                     ".cixpkg.minisig") == 0,
+	      "a cixpkg signature's suffix is the compound, never a bare .cixpkg");
+	CHECK(store_is_signature("zstd-1.5.7-3-x86_64.cixpkg.minisig"),
+	      "a .cixpkg.minisig is a signature");
+	CHECK(!store_is_signature("zstd-1.5.7-3-x86_64.cixpkg"), "the package itself is not");
+
+	CHECK(store_signature_name("zstd-1.5.7-3-x86_64.cixpkg", out, sizeof(out)) == 0 &&
+	              strcmp(out, "zstd-1.5.7-3-x86_64.cixpkg.minisig") == 0,
+	      "a cixpkg's signature is named from the cixpkg");
+
+	/*
+	 * Today's answer, and deliberately asserted as today's rather than
+	 * as settled: whether the store should REFUSE an unsigned .cixpkg
+	 * the way it refuses an unsigned .iso is itdlabs/cix-cache#15, and
+	 * an unsigned package being accepted is what every package does
+	 * now. If #15 decides otherwise, this line is the one that fails,
+	 * which is the point of writing it down.
+	 */
+	CHECK(!store_needs_signature("zstd-1.5.7-3-x86_64.cixpkg"),
+	      "an unsigned .cixpkg is accepted, as an unsigned package is (pending #15)");
+
+	/* The stem is the identity, and the suffix is not part of it. */
+	store_split_display("zstd-1.5.7-3-x86_64.tar.gz", pn, sizeof(pn), pv, sizeof(pv), &pr, pa,
+	                    sizeof(pa));
+	store_split_display("zstd-1.5.7-3-x86_64.cixpkg", cn, sizeof(cn), cv, sizeof(cv), &cr, ca,
+	                    sizeof(ca));
+	CHECK(strcmp(pn, cn) == 0 && strcmp(pv, cv) == 0 && pr == cr && strcmp(pa, ca) == 0,
+	      "two encodings of one identity parse to the same identity");
+
+	/* And canonicalisation reaches it like any other suffix. */
+	CHECK(store_canonical_name("zstd-1.5.7-x86_64.cixpkg", out, sizeof(out)) == 1 &&
+	              strcmp(out, "zstd-1.5.7-1-x86_64.cixpkg") == 0,
+	      "an omitted release means 1 on a .cixpkg too");
+	CHECK(store_canonical_name("zstd-1.5.7-x86_64.cixpkg.minisig", out, sizeof(out)) == 1 &&
+	              strcmp(out, "zstd-1.5.7-1-x86_64.cixpkg.minisig") == 0,
+	      "and its signature canonicalises to the matching name");
+}
+
+
 int main(void)
 {
 	char root[] = "/tmp/cixcache-test-store-XXXXXX";
@@ -833,6 +909,7 @@ int main(void)
 	test_list_order(root);
 	test_arch(root);
 	test_signatures();
+	test_cixpkg();
 
 	if (g_failures == 0)
 		printf("test_store: ok\n");

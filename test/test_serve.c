@@ -175,6 +175,83 @@ int main(void)
 		CHECK(atoi(n2) == 0, "?after= past the end returns nothing to re-show");
 	}
 
+	/*
+	 * CIXPKG end to end (#13).
+	 *
+	 * The ticket's live evidence was a ROUTING failure, not a store
+	 * miss: an absent .tar.gz answered {"error":"not found"} while an
+	 * absent .cixpkg answered {"error":"no such endpoint"}, because
+	 * is_artifact_path() asks the suffix table and the table had never
+	 * heard of it -- so the request was never an artifact request at
+	 * all. That discriminator is what this asserts, from both sides.
+	 */
+	{
+		char pkg_path[300];
+		char sig_path[300];
+		char pkg_digest[128];
+		char sig_digest[128];
+		char c[700];
+		char body[256];
+		char ctype[128];
+		char installers[64];
+		char packages[64];
+
+		snprintf(pkg_path, sizeof(pkg_path), "%s/zstd.cixpkg", ts.root);
+		ts_make_file(pkg_path, 4096);
+		CHECK(ts_sha256(pkg_path, pkg_digest, sizeof(pkg_digest)) == 0, "hash the cixpkg fixture");
+
+		/* Absent, but now recognised: a store miss, not a routing miss. */
+		snprintf(c, sizeof(c), "curl -s 'http://127.0.0.1:%d/nosuch-1.0-1-x86_64.cixpkg'", PORT);
+		ts_capture(c, body, sizeof(body));
+		CHECK(strstr(body, "not found") != NULL && strstr(body, "no such endpoint") == NULL,
+		      "an absent .cixpkg is a store miss, not an unrouted path");
+
+		CHECK(publish(&ts, pkg_path, "zstd-1.5.7-3-x86_64.cixpkg", pkg_digest) == 201,
+		      "a .cixpkg can be published");
+		CHECK(ts_status(PORT, "GET", "/zstd-1.5.7-3-x86_64.cixpkg", NULL) == 200,
+		      "and served from the root of base_url like any package");
+
+		snprintf(c, sizeof(c),
+		         "curl -sI 'http://127.0.0.1:%d/zstd-1.5.7-3-x86_64.cixpkg' "
+		         "| grep -i '^Content-Type:' | cut -d' ' -f2- | tr -d '\r'",
+		         PORT);
+		CHECK(ts_capture(c, ctype, sizeof(ctype)) == 0 &&
+		              strncmp(ctype, "application/octet-stream", 23) == 0,
+		      "a cixpkg is typed as an opaque container, not as gzip");
+
+		/* A signature composes with it exactly as with .tar.gz (#12). */
+		snprintf(sig_path, sizeof(sig_path), "%s/zstd.cixpkg.minisig", ts.root);
+		ts_make_file(sig_path, 128);
+		CHECK(ts_sha256(sig_path, sig_digest, sizeof(sig_digest)) == 0, "hash the signature");
+		CHECK(publish(&ts, sig_path, "zstd-1.5.7-3-x86_64.cixpkg.minisig", sig_digest) == 201,
+		      "its detached signature publishes alongside it");
+
+		/*
+		 * The tier question, asserted because it is the one thing that
+		 * could have gone wrong silently: store_needs_signature() is
+		 * what the listing uses to count installers, so a .cixpkg that
+		 * fell on the wrong side of it would be counted as something
+		 * you boot. Nothing published here is an installer.
+		 */
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/status' | tr ',' '\n' "
+		         "| grep '\"packages\":' | cut -d: -f2",
+		         PORT);
+		ts_capture(c, packages, sizeof(packages));
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/status' | tr ',' '\n' "
+		         "| grep '\"installers\"' | cut -d: -f2",
+		         PORT);
+		ts_capture(c, installers, sizeof(installers));
+		/*
+		 * The package count is asserted first so this cannot pass by
+		 * reading nothing: atoi("") is 0, and an installers check on
+		 * its own would be satisfied by a field that was never there.
+		 */
+		CHECK(atoi(packages) >= 2, "the cixpkg is in the listing alongside the tarball");
+		CHECK(atoi(installers) == 0, "a .cixpkg counts as a package, never as an installer");
+	}
+
 	ts_stop(&ts);
 	if (g_failures == 0)
 		printf("test_serve: ok\n");

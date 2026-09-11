@@ -423,6 +423,16 @@ static const char *artifact_content_type(const char *name)
 		return "application/gzip";
 	if (strcmp(ext, ".iso") == 0)
 		return "application/x-iso9660-image";
+	/*
+	 * CIXPKG is its own container with its own header, not a gzip
+	 * stream wearing a different name, so "application/gzip" would be
+	 * a lie to anything that believes the header. There is no
+	 * registered type for it, and octet-stream is the honest answer
+	 * -- stated here rather than reached by falling off the end, so a
+	 * reader can tell it was decided.
+	 */
+	if (strcmp(ext, ".cixpkg") == 0)
+		return "application/octet-stream";
 	return "application/octet-stream";
 }
 

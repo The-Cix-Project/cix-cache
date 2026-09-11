@@ -182,9 +182,10 @@ int store_signature_name(const char *name, char *out, size_t out_size);
  * path-resolution hot path. The whole basename is the key, looked up
  * literally.
  *
- * Accepts [A-Za-z0-9._-] only, requires a .tar.gz suffix, rejects a
- * leading dot and any "..". Because this is a whitelist, traversal is
- * structurally impossible rather than filtered against.
+ * Accepts [A-Za-z0-9._-] only, requires one of the suffixes the table
+ * above recognises, rejects a leading dot and any "..". Because this is
+ * a whitelist, traversal is structurally impossible rather than
+ * filtered against.
  *
  * Returns 1 if valid, 0 otherwise.
  */
