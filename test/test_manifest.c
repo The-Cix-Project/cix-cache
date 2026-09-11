@@ -24,6 +24,32 @@ static int g_failures;
 
 static const char *HEX64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 
+/*
+ * Occurrences of a key in the raw JSON.
+ *
+ * json_object_get() finds the FIRST match, so asking it about a
+ * duplicated key answers whichever entry happened to be emitted first
+ * and says nothing about the other -- which is exactly how the bug
+ * this counts for slipped through a test that looked like it covered
+ * it. Two entries sharing a key is the defect; the raw text is the
+ * only place that is visible.
+ */
+static int count_key(const char *json, size_t len, const char *key)
+{
+	char needle[256];
+	size_t nlen;
+	size_t i;
+	int n = 0;
+
+	nlen = (size_t)snprintf(needle, sizeof(needle), "\"%s\":", key);
+	if (nlen >= sizeof(needle) || len < nlen)
+		return 0;
+	for (i = 0; i + nlen <= len; i++)
+		if (memcmp(json + i, needle, nlen) == 0)
+			n++;
+	return n;
+}
+
 static void publish_fixture(const char *root, const char *name, const char *content)
 {
 	char digest[STORE_SHA256_MAX];
@@ -118,6 +144,65 @@ int main(void)
 		}
 		jw_free(&w);
 		store_set_signature_policy(".iso", bad, sizeof(bad));
+	}
+
+	/*
+	 * An installer is one entry carrying its signature, not two.
+	 *
+	 * Caught in production rather than here, which is why this exists:
+	 * the installers section filters on store_is_installer(), and that
+	 * answers which TIER a name's bytes belong to -- true for an ISO's
+	 * signature as well, since its bytes are counted with the ISO.
+	 * Without excluding signatures the way the packages section does,
+	 * ".iso.minisig" became a row of its own, emit_key() gave it the
+	 * same key as the ISO, and the section ended up describing the
+	 * signature's 287 bytes as the installer.
+	 */
+	{
+		const struct json_value *inst;
+
+		publish_fixture(root, "cix-installer-2.5.0-1-x86_64.iso.minisig", "sig bytes");
+		publish_fixture(root, "cix-installer-2.5.0-1-x86_64.iso", "iso bytes");
+
+		jw_init(&w);
+		manifest_write_json(&w);
+		parsed = json_parse(w.buf, w.len);
+		CHECK(parsed != NULL, "manifest with an installer is valid JSON");
+		if (parsed != NULL) {
+			sec = json_object_get(parsed, "installers");
+			CHECK(sec != NULL && sec->type == JSON_OBJECT, "installers section present");
+			inst = sec != NULL ? json_object_get(sec, "cix-installer-2.5.0-1-x86_64") : NULL;
+			CHECK(inst != NULL, "the installer is keyed by name-version-release-arch");
+			/*
+			 * The assertion that actually bites. The ISO and its
+			 * signature share a stem, so both emit the same key --
+			 * and a lookup would still find the ISO if it came first.
+			 */
+			CHECK(count_key(w.buf, w.len, "cix-installer-2.5.0-1-x86_64") == 1,
+			      "exactly one entry carries that key, not one per file sharing the stem");
+			CHECK(inst != NULL &&
+			              strcmp(json_as_string(json_object_get(inst, "file")),
+			                     "packages/cix-installer-2.5.0-1-x86_64.iso") == 0,
+			      "and its file is the ISO, never the signature that shares its stem");
+			CHECK(inst != NULL && json_as_number(json_object_get(inst, "bytes")) == 9,
+			      "with the ISO's byte count, not the signature's");
+			{
+				const struct json_value *sig =
+				        inst != NULL ? json_object_get(inst, "signature") : NULL;
+
+				CHECK(sig != NULL, "the signature is nested inside it");
+				CHECK(sig != NULL &&
+				              strcmp(json_as_string(json_object_get(sig, "file")),
+				                     "packages/cix-installer-2.5.0-1-x86_64.iso.minisig") == 0,
+				      "and that is the only place it appears");
+			}
+			/* Nor is it a row in the other section. */
+			sec = json_object_get(parsed, "packages");
+			CHECK(sec != NULL && json_object_get(sec, "cix-installer-2.5.0-1-x86_64") == NULL,
+			      "an installer is not also a package");
+			json_free(parsed);
+		}
+		jw_free(&w);
 	}
 	if (g_failures == 0)
 		printf("test_manifest: ok\n");

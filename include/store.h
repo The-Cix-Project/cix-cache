@@ -160,9 +160,11 @@ int store_is_signature(const char *name);
 int store_needs_signature(const char *name);
 
 /*
- * Which TIER an artifact belongs to, which is fixed and never
- * configurable. True for an installer and for an installer's
- * signature, whose bytes belong with what it signs.
+ * Which TIER a published name's bytes belong to, which is fixed and
+ * never configurable. True for an installer AND for an installer's
+ * signature, since a signature's bytes belong with what it signs --
+ * so a caller listing artifacts rather than counting bytes must
+ * exclude signatures itself, the way both MANIFEST.json sections do.
  *
  * Separate from store_needs_signature() since #15, and the separation
  * is load-bearing: this is what MANIFEST.json splits its "packages"

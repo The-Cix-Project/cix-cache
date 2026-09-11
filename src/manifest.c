@@ -116,8 +116,16 @@ void manifest_write_json(struct json_writer *w)
 		 * "packages" and into "installers", and the daemon that
 		 * resolves name@version for install would have stopped seeing
 		 * it -- a config key quietly unpublishing the store.
+		 *
+		 * Signatures excluded exactly as the packages section excludes
+		 * them, and NOT redundantly: store_is_installer() answers
+		 * which tier a name's bytes belong to, and an ISO's signature
+		 * belongs to the installer tier -- that is what puts its bytes
+		 * in installer_bytes. It is still not a row. A signature
+		 * appears in this section only as the nested "signature" of
+		 * what it signs, which emit_signature() writes below.
 		 */
-		if (!store_is_installer(ents[i].name))
+		if (store_is_signature(ents[i].name) || !store_is_installer(ents[i].name))
 			continue;
 		emit_key(w, ents[i].name);
 		jw_obj_open(w);
