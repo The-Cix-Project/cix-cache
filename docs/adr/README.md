@@ -20,6 +20,7 @@ reasoning incoherent.
 | [0009](0009-ordering.md) | How listings, manifests and versions are ordered | accepted |
 | [0010](0010-installer-isos-are-served-and-signed.md) | Installer ISOs are served, and signed | accepted; refines 0006 |
 | [0011](0011-brand-typography-and-palette.md) | The dashboard follows the Cix brand system | accepted |
+| [0012](0012-cixpkg-and-signature-policy.md) | CIXPKG is a package format; the listing groups by identity; the signature rule is policy | accepted; refines 0006, 0009 and 0010 |
 
 Nothing is currently undecided. Work in flight is tracked in the issue
 tracker rather than here.

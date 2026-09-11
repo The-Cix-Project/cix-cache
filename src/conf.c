@@ -11,6 +11,13 @@ void conf_defaults(struct conf *c)
 	snprintf(c->bind, sizeof(c->bind), "%s", "0.0.0.0");
 	snprintf(c->web_root, sizeof(c->web_root), "%s", "web");
 	c->port = 8080;
+	/*
+	 * Today's behaviour, and the only tier whose absence of a
+	 * signature is dangerous on its own: an ISO is booted, so nothing
+	 * downstream gets a chance to check it. See
+	 * docs/adr/0012-cixpkg-and-signature-policy.md.
+	 */
+	snprintf(c->require_signature, sizeof(c->require_signature), "%s", ".iso");
 }
 
 /*
@@ -60,6 +67,22 @@ int conf_extract(const char *buf, const char *key, char *out, size_t out_size)
 	return 0;
 }
 
+/*
+ * Overlays one key onto an existing value, leaving it alone when the
+ * key is absent. The default a caller set before conf_load() is the
+ * value that stands, which is the whole contract of "overlays path
+ * onto c".
+ */
+static void overlay(const char *buf, const char *key, char *out, size_t out_size)
+{
+	char tmp[CONF_PATH_MAX];
+
+	if (out_size > sizeof(tmp))
+		return;
+	if (conf_extract(buf, key, tmp, sizeof(tmp)) == 0)
+		snprintf(out, out_size, "%s", tmp);
+}
+
 int conf_load(struct conf *c, const char *path)
 {
 	char portbuf[32];
@@ -92,11 +115,20 @@ int conf_load(struct conf *c, const char *path)
 	buf[size] = '\0';
 	fclose(f);
 
-	conf_extract(buf, "root=", c->root, sizeof(c->root));
-	conf_extract(buf, "bind=", c->bind, sizeof(c->bind));
-	conf_extract(buf, "web_root=", c->web_root, sizeof(c->web_root));
-	conf_extract(buf, "push_token=", c->push_token, sizeof(c->push_token));
-	conf_extract(buf, "pull_token=", c->pull_token, sizeof(c->pull_token));
+	/*
+	 * Each overlaid only when the key is actually present. Assigning
+	 * unconditionally blanked every default the file did not mention
+	 * -- conf_extract() empties its output before deciding the key is
+	 * absent -- so a config setting only port= came back with no root
+	 * and no web_root, and conf_defaults() was the source of truth
+	 * only for a config file that did not exist at all.
+	 */
+	overlay(buf, "root=", c->root, sizeof(c->root));
+	overlay(buf, "bind=", c->bind, sizeof(c->bind));
+	overlay(buf, "web_root=", c->web_root, sizeof(c->web_root));
+	overlay(buf, "push_token=", c->push_token, sizeof(c->push_token));
+	overlay(buf, "pull_token=", c->pull_token, sizeof(c->pull_token));
+	overlay(buf, "require_signature=", c->require_signature, sizeof(c->require_signature));
 	if (conf_extract(buf, "port=", portbuf, sizeof(portbuf)) == 0)
 		c->port = atoi(portbuf);
 	free(buf);

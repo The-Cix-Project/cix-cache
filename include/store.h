@@ -160,6 +160,40 @@ int store_is_signature(const char *name);
 int store_needs_signature(const char *name);
 
 /*
+ * Which TIER an artifact belongs to, which is fixed and never
+ * configurable. True for an installer and for an installer's
+ * signature, whose bytes belong with what it signs.
+ *
+ * Separate from store_needs_signature() since #15, and the separation
+ * is load-bearing: this is what MANIFEST.json splits its "packages"
+ * and "installers" sections on and what the status counters count,
+ * while that one is policy an operator can change. While they were one
+ * function, requiring a signature for a package suffix would have
+ * moved every such package out of the section the Cix daemon installs
+ * from -- a config key silently unpublishing the store's whole reason
+ * to exist. See docs/adr/0012-cixpkg-and-signature-policy.md.
+ */
+int store_is_installer(const char *name);
+
+/*
+ * Sets which suffixes may not be published unsigned, from a comma
+ * separated list ("" for none, ".iso" for the default). Entries are
+ * matched with or without the leading dot, because an operator hand
+ * edits this.
+ *
+ * Writes the require_sig field of the suffix table and nothing else,
+ * so the table stays the only place this is recorded and no second
+ * copy can disagree with it. The tier is not writable from here.
+ *
+ * Returns 0, or -1 if any entry named no suffix this store recognises,
+ * with the first such entry copied to bad. Unrecognised entries are
+ * skipped rather than fatal: refusing to start takes the cache down,
+ * and a cache that is down means every host builds from source, which
+ * is slow but safe. The caller is expected to say so loudly.
+ */
+int store_set_signature_policy(const char *list, char *bad, size_t bad_size);
+
+/*
  * Builds the signature name for an artifact: <name>.minisig. Returns 0,
  * or -1 for a name that is not a valid artifact, or is itself a
  * signature.

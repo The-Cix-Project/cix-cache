@@ -89,7 +89,7 @@ void manifest_write_json(struct json_writer *w)
 	jw_key(w, "packages");
 	jw_obj_open(w);
 	for (i = 0; i < n; i++) {
-		if (store_is_signature(ents[i].name) || store_needs_signature(ents[i].name))
+		if (store_is_signature(ents[i].name) || store_is_installer(ents[i].name))
 			continue;
 		emit_key(w, ents[i].name);
 		jw_obj_open(w);
@@ -109,7 +109,15 @@ void manifest_write_json(struct json_writer *w)
 	jw_key(w, "installers");
 	jw_obj_open(w);
 	for (i = 0; i < n; i++) {
-		if (!store_needs_signature(ents[i].name))
+		/*
+		 * The TIER, not the signature policy. These were one function
+		 * until #15: with the policy configurable, requiring a
+		 * signature for .cixpkg would have moved every .cixpkg out of
+		 * "packages" and into "installers", and the daemon that
+		 * resolves name@version for install would have stopped seeing
+		 * it -- a config key quietly unpublishing the store.
+		 */
+		if (!store_is_installer(ents[i].name))
 			continue;
 		emit_key(w, ents[i].name);
 		jw_obj_open(w);

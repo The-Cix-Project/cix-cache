@@ -16,6 +16,10 @@
  *   web_root=web
  *   push_token=<token>
  *   pull_token=              (empty -- pull is open)
+ *   require_signature=.iso   (suffixes an unsigned publish is refused for)
+ *
+ * A key the file does not mention keeps the default conf_defaults()
+ * set. This is an overlay, not a replacement.
  */
 
 #define CONF_PATH_MAX 512
@@ -28,6 +32,13 @@ struct conf {
 	char web_root[CONF_PATH_MAX];
 	char push_token[CONF_TOKEN_MAX];
 	char pull_token[CONF_TOKEN_MAX];
+	/*
+	 * Which artifact suffixes may not be published unsigned, comma
+	 * separated, empty for none. The store holds the authoritative
+	 * copy of this policy -- see store_set_signature_policy() -- and
+	 * this is only how an operator states it. Default ".iso".
+	 */
+	char require_signature[CONF_TOKEN_MAX];
 };
 
 void conf_defaults(struct conf *c);

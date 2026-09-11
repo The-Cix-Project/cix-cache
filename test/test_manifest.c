@@ -80,6 +80,45 @@ int main(void)
 
 	json_free(parsed);
 	jw_free(&w);
+
+	/*
+	 * The tier survives a signature policy that covers packages (#15).
+	 *
+	 * This is the failure the split of store_needs_signature() from
+	 * store_is_installer() exists to prevent, and it is worth an
+	 * assertion in the manifest's own tests because the manifest is
+	 * where it would have done real damage: the sections are split on
+	 * the tier, and while the two questions were one function,
+	 * requiring a signature for .cixpkg would have moved every
+	 * .cixpkg out of "packages" -- the section a Cix daemon resolves
+	 * name@version from -- and into "installers", where nothing
+	 * installs from. An operator tightening a policy would have
+	 * unpublished the store.
+	 */
+	{
+		char bad[64];
+
+		publish_fixture(root, "zstd-1.5.7-3-x86_64.cixpkg.minisig", "sig");
+		publish_fixture(root, "zstd-1.5.7-3-x86_64.cixpkg", "cixpkg bytes");
+		CHECK(store_set_signature_policy(".iso,.cixpkg", bad, sizeof(bad)) == 0,
+		      "a policy covering packages applies");
+
+		jw_init(&w);
+		manifest_write_json(&w);
+		parsed = json_parse(w.buf, w.len);
+		CHECK(parsed != NULL, "manifest still generates under that policy");
+		if (parsed != NULL) {
+			sec = json_object_get(parsed, "packages");
+			CHECK(sec != NULL && json_object_get(sec, "zstd-1.5.7-3-x86_64") != NULL,
+			      "a .cixpkg requiring a signature is STILL a package");
+			sec = json_object_get(parsed, "installers");
+			CHECK(sec != NULL && json_object_get(sec, "zstd-1.5.7-3-x86_64") == NULL,
+			      "and has not become an installer");
+			json_free(parsed);
+		}
+		jw_free(&w);
+		store_set_signature_policy(".iso", bad, sizeof(bad));
+	}
 	if (g_failures == 0)
 		printf("test_manifest: ok\n");
 	else

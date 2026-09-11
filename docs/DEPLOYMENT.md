@@ -43,16 +43,38 @@ port=8080
 web_root=/usr/share/cixcache/web
 push_token=<a long random string>
 pull_token=
+require_signature=.iso
 ```
 
 ```
 build/cixcached --config=/etc/cixcache.conf
 ```
 
+A key the file does not mention keeps its built-in default; only the keys
+it names are overlaid. An empty value is itself a value — `pull_token=`
+means pull is open, and `require_signature=` means nothing is refused for
+being unsigned.
+
 `pull_token` empty means pull is open. **Set `push_token`.** Pull may be
 open because consumers verify every byte against a checksum from git; an
 open push lets anyone fill the disk. The dashboard shows `push: OPEN` in a
 warning colour when it is unset.
+
+`require_signature` lists the artifact suffixes that may not be published
+without a detached `.minisig` beside them, comma separated, matched with
+or without the leading dot. The default `.iso` is the historical
+behaviour and the one case that stands on its own: an ISO is booted, so
+nothing downstream gets a chance to check it. Adding `.cixpkg` or
+`.tar.gz` makes the store refuse unsigned packages too — worth knowing
+that this will 409 a push from any Cix host whose signing key is not
+configured, which is why it is not the default. A suffix the store does
+not recognise is reported on stderr at startup and **not** enforced.
+
+This is hygiene, not security. The store is not a trust boundary
+(cix-build-system ADR-0001): what protects an installed package is the
+`pkg_artifact_sha256` in its git recipe and the install-side signature
+check, neither of which this setting replaces. See
+[ADR-0012](adr/0012-cixpkg-and-signature-policy.md).
 
 There is no TLS here, by design — the registry is not a trust boundary
 (`docs/adr/0002-...`). Put it behind a reverse proxy if you want transport

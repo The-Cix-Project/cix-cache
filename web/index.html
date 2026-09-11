@@ -272,6 +272,14 @@ cixctl --host=&lt;box&gt; pkg sync</code></pre>
 			name with <code>.iso.minisig</code>. An ISO with no signature published is refused
 			with <span class="tag warn">409</span> &mdash; publish the signature first.
 		</p>
+		<p>
+			Which suffixes are refused unsigned is the server's
+			<code>require_signature</code> setting, <code>.iso</code> by default. A store may
+			be configured to demand one for packages too; a signature composes with any
+			artifact suffix, so <code>.cixpkg.minisig</code> signs a package exactly as
+			<code>.iso.minisig</code> signs an installer. It does not change which tier an
+			artifact is in &mdash; a signed package is still a package.
+		</p>
 		<pre><code>curl -fsSLO http://&lt;host&gt;:8080/cix-installer-2.2.0-1-x86_64.iso
 curl -fsSLO http://&lt;host&gt;:8080/cix-installer-2.2.0-1-x86_64.iso.minisig
 minisign -Vm cix-installer-2.2.0-1-x86_64.iso -p cix.pub</code></pre>

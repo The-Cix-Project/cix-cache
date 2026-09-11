@@ -100,46 +100,155 @@ int store_digest_is_valid(const char *s)
 }
 
 /*
+ * Every suffix the store recognises, and everything the store knows
+ * about it. One table and not three: the tier an artifact belongs to
+ * and whether it may be published unsigned were both once answered by
+ * comparing against ".iso" at each site that asked, which is how the
+ * two questions came to be the same function and how the fourth site
+ * would have got one of them wrong.
+ *
  * Longest first: a compound suffix has to win over the shorter one it
- * ends with, or ".iso.minisig" would be read as a ".minisig" whose stem
- * still carries ".iso".
+ * ends with, or ".iso.minisig" would be read as a ".minisig" whose
+ * stem still carries ".iso".
+ *
+ * installer is the TIER, and is fixed. It is what MANIFEST.json splits
+ * on and what the status counters count, and nothing configurable may
+ * write it -- an operator changing a policy must not be able to move
+ * an artifact out of the section a daemon installs from. A signature
+ * carries the tier of what it signs, so its bytes are counted with it.
+ *
+ * require_sig is POLICY, and is the one field configuration writes.
+ * See store_set_signature_policy().
  */
-static const char *const g_suffixes[] = { ".tar.gz.minisig", ".cixpkg.minisig",
-                                         ".iso.minisig", ".tar.gz", ".cixpkg",
-                                         ".iso", NULL };
+struct suffix {
+	const char *ext;
+	int installer;
+	int require_sig;
+};
 
-const char *store_suffix_of(const char *name)
+static struct suffix g_suffixes[] = {
+	{ ".tar.gz.minisig", 0, 0 }, { ".cixpkg.minisig", 0, 0 }, { ".iso.minisig", 1, 0 },
+	{ ".tar.gz", 0, 0 },         { ".cixpkg", 0, 0 },         { ".iso", 1, 1 },
+	{ NULL, 0, 0 }
+};
+
+/* The record for a published name, or NULL if the store knows no such suffix. */
+static struct suffix *suffix_record(const char *name)
 {
 	size_t len = strlen(name);
 	size_t i;
 
-	for (i = 0; g_suffixes[i] != NULL; i++) {
-		size_t slen = strlen(g_suffixes[i]);
+	for (i = 0; g_suffixes[i].ext != NULL; i++) {
+		size_t slen = strlen(g_suffixes[i].ext);
 
-		if (len > slen && strcmp(name + len - slen, g_suffixes[i]) == 0)
-			return g_suffixes[i];
+		if (len > slen && strcmp(name + len - slen, g_suffixes[i].ext) == 0)
+			return &g_suffixes[i];
 	}
 	return NULL;
+}
+
+const char *store_suffix_of(const char *name)
+{
+	const struct suffix *s = suffix_record(name);
+
+	return s != NULL ? s->ext : NULL;
+}
+
+/*
+ * Whether a SUFFIX is a signature's: any recognised suffix ending in
+ * .minisig, whatever it signs. Separate from store_is_signature() only
+ * because that takes a published name, and the policy setter is
+ * looking at bare table entries -- both answer the question here, so
+ * there is one definition of what makes a suffix a signature.
+ */
+static int ext_is_signature(const char *ext)
+{
+	size_t tail = strlen(STORE_SIG_EXT);
+	size_t len = strlen(ext);
+
+	return len > tail && strcmp(ext + len - tail, STORE_SIG_EXT) == 0;
 }
 
 int store_is_signature(const char *name)
 {
 	const char *ext = store_suffix_of(name);
-	size_t tail = strlen(STORE_SIG_EXT);
-	size_t len;
 
-	if (ext == NULL)
-		return 0;
-	len = strlen(ext);
-	/* Any recognised suffix ENDING in .minisig, whatever it signs. */
-	return len > tail && strcmp(ext + len - tail, STORE_SIG_EXT) == 0;
+	return ext != NULL && ext_is_signature(ext);
+}
+
+int store_is_installer(const char *name)
+{
+	const struct suffix *s = suffix_record(name);
+
+	return s != NULL && s->installer;
 }
 
 int store_needs_signature(const char *name)
 {
-	const char *ext = store_suffix_of(name);
+	const struct suffix *s = suffix_record(name);
 
-	return ext != NULL && strcmp(ext, ".iso") == 0;
+	return s != NULL && s->require_sig;
+}
+
+int store_set_signature_policy(const char *list, char *bad, size_t bad_size)
+{
+	const char *p = list;
+	int rc = 0;
+	size_t i;
+
+	if (bad != NULL && bad_size > 0)
+		bad[0] = '\0';
+	for (i = 0; g_suffixes[i].ext != NULL; i++)
+		g_suffixes[i].require_sig = 0;
+	if (list == NULL)
+		return 0;
+	while (*p != '\0') {
+		char entry[64];
+		const char *start;
+		size_t len;
+		int found = 0;
+
+		while (*p == ',' || *p == ' ' || *p == '\t')
+			p++;
+		if (*p == '\0')
+			break;
+		start = p;
+		while (*p != '\0' && *p != ',')
+			p++;
+		len = (size_t)(p - start);
+		while (len > 0 && (start[len - 1] == ' ' || start[len - 1] == '\t'))
+			len--;
+		if (len == 0 || len >= sizeof(entry))
+			continue;
+		memcpy(entry, start, len);
+		entry[len] = '\0';
+		for (i = 0; g_suffixes[i].ext != NULL; i++) {
+			/*
+			 * With or without the leading dot. This is hand-edited
+			 * by an operator, and "iso" is what they will write.
+			 */
+			const char *ext = g_suffixes[i].ext;
+
+			if (strcmp(entry, ext) == 0 || strcmp(entry, ext + 1) == 0) {
+				/*
+				 * A signature of a signature is not a thing, so
+				 * naming one here is a mistake rather than a
+				 * policy -- reported as unrecognised.
+				 */
+				if (ext_is_signature(ext))
+					break;
+				g_suffixes[i].require_sig = 1;
+				found = 1;
+				break;
+			}
+		}
+		if (!found) {
+			rc = -1;
+			if (bad != NULL && bad[0] == '\0')
+				snprintf(bad, bad_size, "%s", entry);
+		}
+	}
+	return rc;
 }
 
 int store_signature_name(const char *name, char *out, size_t out_size)

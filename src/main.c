@@ -755,7 +755,14 @@ static void begin_upload(struct conn *cc, const struct http_request *req, const 
 		    store_resolve(sig, found, sizeof(found)) != STORE_OK) {
 			char msg[STORE_NAME_MAX + 64];
 
-			snprintf(msg, sizeof(msg), "publish %s first -- an ISO may not be unsigned", sig);
+			/*
+			 * Names the suffix rather than saying "an ISO": which
+			 * suffixes require a signature is configurable since #15,
+			 * so a message naming one of them is a message that will
+			 * be wrong for somebody.
+			 */
+			snprintf(msg, sizeof(msg), "publish %s first -- %s may not be unsigned here", sig,
+			         store_suffix_of(name));
 			server_log("warn", "push %s refused: no signature published", name);
 			respond_error(cc, 409, msg);
 			return;
@@ -1085,13 +1092,13 @@ static int count_entry(const char *name, const char *digest, off_t size, time_t 
 	 * suffix already says: .iso.minisig counts against installers,
 	 * .tar.gz.minisig against packages. Folding every signature into
 	 * installer_bytes was right only while ISOs were the only signed
-	 * thing.
+	 * thing. The suffix table carries the tier for the signature
+	 * suffixes too, so this asks it rather than matching ".iso" by
+	 * prefix and hoping no later suffix starts the same way.
 	 */
 	if (store_is_signature(name)) {
-		const char *ext = store_suffix_of(name);
-
 		if (size > 0) {
-			if (ext != NULL && strncmp(ext, ".iso", 4) == 0)
+			if (store_is_installer(name))
 				lc->installer_bytes += (long long)size;
 			else
 				lc->bytes += (long long)size;
@@ -1101,7 +1108,12 @@ static int count_entry(const char *name, const char *digest, off_t size, time_t 
 	/* An ISO with no architecture is as dangerous as a package with none. */
 	if (store_arch_of(name, NULL, 0) == NULL)
 		lc->unstamped++;
-	if (store_needs_signature(name)) {
+	/*
+	 * The tier and not the signature policy, which came apart in #15.
+	 * Asked of the policy, turning on a requirement for .cixpkg would
+	 * have counted every package as a bootable installer here.
+	 */
+	if (store_is_installer(name)) {
 		lc->installers++;
 		if (size > 0)
 			lc->installer_bytes += (long long)size;
@@ -1946,6 +1958,7 @@ static void usage(FILE *out)
 	fprintf(out,
 	        "usage: cixcached [--config=PATH] [--root=DIR] [--bind=ADDR] [--port=N]\n"
 	        "                 [--web-root=DIR] [--push-token=TOK] [--pull-token=TOK]\n"
+	        "                 [--require-signature=SUFFIXES]\n"
 	        "       cixcached --import [--dry-run] [--root=DIR]\n"
 	        "       cixcached --canonicalize [--dry-run] [--root=DIR]\n"
 	        "       cixcached --set-arch=ARCH [--dry-run] [--root=DIR]\n"
@@ -1987,6 +2000,9 @@ int main(int argc, char **argv)
 			snprintf(g_conf.push_token, sizeof(g_conf.push_token), "%s", argv[i] + 13);
 		else if (strncmp(argv[i], "--pull-token=", 13) == 0)
 			snprintf(g_conf.pull_token, sizeof(g_conf.pull_token), "%s", argv[i] + 13);
+		else if (strncmp(argv[i], "--require-signature=", 20) == 0)
+			snprintf(g_conf.require_signature, sizeof(g_conf.require_signature), "%s",
+			         argv[i] + 20);
 		else if (strcmp(argv[i], "--import") == 0)
 			do_import = 1;
 		else if (strcmp(argv[i], "--canonicalize") == 0)
@@ -2006,6 +2022,23 @@ int main(int argc, char **argv)
 			usage(stderr);
 			return 2;
 		}
+	}
+
+	/*
+	 * Applied before anything can be published, and applied whatever
+	 * the source of the value, so the flag and the config key cannot
+	 * mean different things. The store holds the policy from here on
+	 * -- g_conf.require_signature is how it was stated, not where it
+	 * lives.
+	 */
+	{
+		char bad[64];
+
+		if (store_set_signature_policy(g_conf.require_signature, bad, sizeof(bad)) != 0)
+			fprintf(stderr,
+			        "cixcached: require_signature: '%s' is not a suffix this store "
+			        "recognises -- ignored, and nothing enforces it\n",
+			        bad);
 	}
 
 	if (store_init(g_conf.root) != 0)

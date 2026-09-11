@@ -22,7 +22,7 @@ SERVER_SRCS := src/json.c src/http.c src/store.c src/manifest.c src/conf.c src/i
 CLIENT_SRCS := client/src/httpclient.c src/json.c
 
 TESTS := $(BUILD)/test_store $(BUILD)/test_http $(BUILD)/test_serve $(BUILD)/test_push \
-	$(BUILD)/test_import $(BUILD)/test_manifest $(BUILD)/test_gc
+	$(BUILD)/test_import $(BUILD)/test_manifest $(BUILD)/test_gc $(BUILD)/test_conf
 
 PREFIX := /opt/cixcache
 
@@ -58,6 +58,9 @@ $(BUILD)/test_store: test/test_store.c src/store.c | $(BUILD)
 	$(CC) $(CFLAGS) $^ -o $@
 
 $(BUILD)/test_http: test/test_http.c src/http.c | $(BUILD)
+	$(CC) $(CFLAGS) $^ -o $@
+
+$(BUILD)/test_conf: test/test_conf.c src/conf.c | $(BUILD)
 	$(CC) $(CFLAGS) $^ -o $@
 
 $(BUILD)/test_manifest: test/test_manifest.c src/manifest.c src/store.c src/json.c | $(BUILD)

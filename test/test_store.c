@@ -881,6 +881,72 @@ static void test_cixpkg(void)
 }
 
 
+/*
+ * The signature policy is configurable, the tier is not (#15).
+ *
+ * These two questions were one function until this change, and the
+ * test that matters most is the one asserting they no longer move
+ * together: turning a requirement on for .cixpkg must not make a
+ * .cixpkg an installer, because the installer tier is what
+ * MANIFEST.json splits on and what a Cix daemon installs from.
+ */
+static void test_signature_policy(void)
+{
+	char bad[64];
+
+	/* The default, which is today's behaviour and what every other
+	 * test in this file assumes. */
+	CHECK(store_needs_signature("a-1.0-1-x86_64.iso"), "an ISO must be signed by default");
+	CHECK(!store_needs_signature("a-1.0-1-x86_64.cixpkg"), "and nothing else is, by default");
+
+	CHECK(store_set_signature_policy(".iso,.cixpkg", bad, sizeof(bad)) == 0,
+	      "a policy naming known suffixes is accepted");
+	CHECK(store_needs_signature("a-1.0-1-x86_64.cixpkg"), "a .cixpkg can be made to require one");
+	CHECK(store_needs_signature("a-1.0-1-x86_64.iso"), "without releasing the ISO from it");
+	CHECK(!store_needs_signature("a-1.0-1-x86_64.tar.gz"), "and nothing it did not name");
+
+	/*
+	 * The whole reason the predicate was split. Asked of the policy,
+	 * every one of these would now answer "installer".
+	 */
+	CHECK(!store_is_installer("a-1.0-1-x86_64.cixpkg"),
+	      "requiring a signature does NOT move a package into the installer tier");
+	CHECK(!store_is_installer("a-1.0-1-x86_64.tar.gz"), "a package is never an installer");
+	CHECK(store_is_installer("a-1.0-1-x86_64.iso"), "an ISO always is");
+	CHECK(store_is_installer("a-1.0-1-x86_64.iso.minisig"),
+	      "and so is its signature, whose bytes belong with it");
+	CHECK(!store_is_installer("a-1.0-1-x86_64.tar.gz.minisig"),
+	      "while a package signature's belong with the package");
+
+	/* An empty policy is a policy: nothing is refused for being unsigned. */
+	CHECK(store_set_signature_policy("", bad, sizeof(bad)) == 0, "an empty policy is accepted");
+	CHECK(!store_needs_signature("a-1.0-1-x86_64.iso"), "and releases even the ISO");
+	CHECK(store_is_installer("a-1.0-1-x86_64.iso"), "which still does not change its tier");
+
+	/* Hand-edited by an operator, so the dot is optional. */
+	CHECK(store_set_signature_policy("iso", bad, sizeof(bad)) == 0, "a dotless spelling works");
+	CHECK(store_needs_signature("a-1.0-1-x86_64.iso"), "and means the same thing");
+
+	CHECK(store_set_signature_policy(".cixpg", bad, sizeof(bad)) == -1 &&
+	              strcmp(bad, ".cixpg") == 0,
+	      "a suffix the store does not know is reported, and named");
+	CHECK(!store_needs_signature("a-1.0-1-x86_64.iso"),
+	      "a rejected entry does not silently leave the previous policy standing");
+	CHECK(store_set_signature_policy(".iso.minisig", bad, sizeof(bad)) == -1,
+	      "a signature cannot be required to carry a signature of its own");
+
+	/*
+	 * Restored, because this is process-wide state and the assertions
+	 * about .iso elsewhere in this file would otherwise depend on the
+	 * order the tests happen to run in.
+	 */
+	CHECK(store_set_signature_policy(".iso", bad, sizeof(bad)) == 0, "the default is restorable");
+	CHECK(store_needs_signature("a-1.0-1-x86_64.iso") &&
+	              !store_needs_signature("a-1.0-1-x86_64.cixpkg"),
+	      "and puts the store back where it started");
+}
+
+
 int main(void)
 {
 	char root[] = "/tmp/cixcache-test-store-XXXXXX";
@@ -910,6 +976,7 @@ int main(void)
 	test_arch(root);
 	test_signatures();
 	test_cixpkg();
+	test_signature_policy();
 
 	if (g_failures == 0)
 		printf("test_store: ok\n");
