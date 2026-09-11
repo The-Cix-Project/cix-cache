@@ -197,6 +197,34 @@ int main(void)
 		      "and a package is still typed as an archive");
 	}
 
+	/*
+	 * Packages are signed additively (cix ADR-0279, #12): a signature
+	 * may be published beside one, but a package is never refused for
+	 * lacking one. That second half is the production-breaking case --
+	 * every daemon without a signing key is still pushing packages.
+	 *
+	 * Note the order is the reverse of the ISO rule: the artifact
+	 * first, then its signature, because the daemon signs only once a
+	 * publish has been accepted.
+	 */
+	CHECK(put(&ts, a_path, "sp-1.0-1-x86_64.tar.gz", a_digest, TOKEN) == 201,
+	      "an unsigned package publishes, as it always has");
+	CHECK(put(&ts, b_path, "sp-1.0-1-x86_64.tar.gz.minisig", b_digest, TOKEN) == 201,
+	      "and its signature publishes afterwards");
+	CHECK(ts_status(PORT, "GET", "/sp-1.0-1-x86_64.tar.gz.minisig", NULL) == 200,
+	      "the package signature is served");
+	{
+		char cmd[512];
+		char body[4096];
+
+		snprintf(cmd, sizeof(cmd),
+		         "curl -sSI 'http://127.0.0.1:%d/sp-1.0-1-x86_64.tar.gz.minisig' "
+		         "| grep -i '^content-type' | tr -d '\\r'",
+		         PORT);
+		CHECK(ts_capture(cmd, body, sizeof(body)) == 0 && strstr(body, "text/plain") != NULL,
+		      "a package signature is typed as text, not as an archive");
+	}
+
 	CHECK(ts_status(PORT, "DELETE", "/p-1.0.tar.gz", NULL) == 401, "delete needs a token");
 	CHECK(ts_status(PORT, "DELETE", "/p-1.0.tar.gz", TOKEN) == 204, "delete unpublishes");
 	CHECK(ts_status(PORT, "GET", "/p-1.0.tar.gz", NULL) == 404, "deleted name is gone");

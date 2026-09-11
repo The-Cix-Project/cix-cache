@@ -415,12 +415,14 @@ static const char *artifact_content_type(const char *name)
 
 	if (ext == NULL)
 		return "application/octet-stream";
+	/* Any signature, whatever it signs -- checked before the bases, so
+	 * ".tar.gz.minisig" is not read as an archive. */
+	if (store_is_signature(name))
+		return "text/plain; charset=utf-8";
 	if (strcmp(ext, ".tar.gz") == 0)
 		return "application/gzip";
 	if (strcmp(ext, ".iso") == 0)
 		return "application/x-iso9660-image";
-	if (strcmp(ext, STORE_SIG_SUFFIX) == 0)
-		return "text/plain; charset=utf-8";
 	return "application/octet-stream";
 }
 
@@ -916,13 +918,24 @@ static int list_entry(const char *name, const char *digest, off_t size, time_t m
 	 * Only for artifacts that carry one, so a package is not implicitly
 	 * described as unsigned when signing is not a thing it does.
 	 */
-	if (store_needs_signature(name)) {
+	{
 		char sig[STORE_NAME_MAX];
 		char found[STORE_SHA256_MAX];
+		int has = store_signature_name(name, sig, sizeof(sig)) == 0 &&
+		          store_resolve(sig, found, sizeof(found)) == STORE_OK;
 
-		jw_key(lc->w, "signed");
-		jw_bool(lc->w, store_signature_name(name, sig, sizeof(sig)) == 0 &&
-		                       store_resolve(sig, found, sizeof(found)) == STORE_OK);
+		/*
+		 * Reported when the artifact either requires a signature or
+		 * actually carries one. A package that has not been signed
+		 * yet reports nothing rather than false: signing packages is
+		 * additive (cix ADR-0279) and hundreds predate it, so "false"
+		 * on every one of them would read as failure rather than as
+		 * work not yet done.
+		 */
+		if (store_needs_signature(name) || has) {
+			jw_key(lc->w, "signed");
+			jw_bool(lc->w, has);
+		}
 	}
 	jw_key(lc->w, "sha256");
 	jw_str(lc->w, digest);
@@ -951,10 +964,22 @@ static int count_entry(const char *name, const char *digest, off_t size, time_t 
 	 * Its bytes are real and stay in the size, but it is not an
 	 * artifact anybody installs, so it is not one of "138 artifacts".
 	 */
-	/* A signature's bytes belong to the installer it signs. */
+	/*
+	 * A signature's bytes belong with whatever it signs, which its own
+	 * suffix already says: .iso.minisig counts against installers,
+	 * .tar.gz.minisig against packages. Folding every signature into
+	 * installer_bytes was right only while ISOs were the only signed
+	 * thing.
+	 */
 	if (store_is_signature(name)) {
-		if (size > 0)
-			lc->installer_bytes += (long long)size;
+		const char *ext = store_suffix_of(name);
+
+		if (size > 0) {
+			if (ext != NULL && strncmp(ext, ".iso", 4) == 0)
+				lc->installer_bytes += (long long)size;
+			else
+				lc->bytes += (long long)size;
+		}
 		return 0;
 	}
 	/* An ISO with no architecture is as dangerous as a package with none. */

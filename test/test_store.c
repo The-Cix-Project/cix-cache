@@ -716,7 +716,7 @@ static void test_signatures(void)
 	      "an .iso is a recognised artifact");
 	/* Longest-first matters: this must not be read as a bare suffix. */
 	CHECK(store_suffix_of("a-1.0-1-x86_64.iso.minisig") != NULL &&
-	              strcmp(store_suffix_of("a-1.0-1-x86_64.iso.minisig"), STORE_SIG_SUFFIX) == 0,
+	              strcmp(store_suffix_of("a-1.0-1-x86_64.iso.minisig"), ".iso.minisig") == 0,
 	      "a compound signature suffix wins over the shorter one it ends with");
 
 	CHECK(store_is_signature("a-1.0-1-x86_64.iso.minisig"), "a .minisig is a signature");
@@ -732,8 +732,57 @@ static void test_signatures(void)
 	CHECK(store_signature_name("a-1.0-1-x86_64.iso", out, sizeof(out)) == 0 &&
 	              strcmp(out, "a-1.0-1-x86_64.iso.minisig") == 0,
 	      "the signature name is derived from the artifact");
-	CHECK(store_signature_name("a-1.0-1-x86_64.tar.gz", out, sizeof(out)) != 0,
-	      "a package has no signature name");
+	/*
+	 * A package DOES have a signature name, now that packages are
+	 * signed too (cix ADR-0279, #12). What it does not have is a
+	 * requirement to be signed -- that is store_needs_signature(),
+	 * asserted separately above, and the two questions came apart
+	 * precisely because gating the name on the requirement meant a
+	 * signed package's signature could not be named.
+	 */
+	CHECK(store_signature_name("a-1.0-1-x86_64.tar.gz", out, sizeof(out)) == 0 &&
+	              strcmp(out, "a-1.0-1-x86_64.tar.gz.minisig") == 0,
+	      "a package's signature is named from the package");
+	CHECK(store_signature_name("a-1.0-1-x86_64.tar.gz.minisig", out, sizeof(out)) != 0,
+	      "a signature has no signature of its own");
+
+	/*
+	 * The regression guard for the stem trap. Registering a bare
+	 * ".minisig" would make it the whole suffix here, leaving
+	 * ".tar.gz" inside the stem -- and then every stem consumer reads
+	 * "gz" as part of the release or architecture. It would not fail,
+	 * it would mis-stamp.
+	 */
+	CHECK(store_suffix_of("zlib-1.3.2-11-x86_64.tar.gz.minisig") != NULL &&
+	              strcmp(store_suffix_of("zlib-1.3.2-11-x86_64.tar.gz.minisig"),
+	                     ".tar.gz.minisig") == 0,
+	      "a package signature's suffix is the compound, never a bare .minisig");
+	CHECK(store_is_signature("zlib-1.3.2-11-x86_64.tar.gz.minisig"),
+	      "a package signature is a signature");
+	CHECK(!store_needs_signature("zlib-1.3.2-11-x86_64.tar.gz"),
+	      "but a package is never REFUSED for being unsigned");
+
+	/* A signature's stem parses identically to its artifact's. */
+	{
+		char an[STORE_NAME_MAX];
+		char av[STORE_NAME_MAX];
+		char aa[64];
+		char sn[STORE_NAME_MAX];
+		char sv[STORE_NAME_MAX];
+		char sa[64];
+		int ar = 0;
+		int sr = 0;
+
+		store_split_display("zlib-1.3.2-11-x86_64.tar.gz", an, sizeof(an), av, sizeof(av), &ar,
+		                    aa, sizeof(aa));
+		store_split_display("zlib-1.3.2-11-x86_64.tar.gz.minisig", sn, sizeof(sn), sv,
+		                    sizeof(sv), &sr, sa, sizeof(sa));
+		CHECK(strcmp(an, sn) == 0 && strcmp(av, sv) == 0 && ar == sr && strcmp(aa, sa) == 0,
+		      "a package signature splits identically to the package");
+	}
+	CHECK(store_canonical_name("zlib-1.3.2-x86_64.tar.gz.minisig", out, sizeof(out)) == 1 &&
+	              strcmp(out, "zlib-1.3.2-1-x86_64.tar.gz.minisig") == 0,
+	      "and canonicalises to its package's counterpart");
 
 	/* The stem parses the same either side of the suffix. */
 	store_split_display("cix-installer-2.2.0-1-x86_64.iso", name, sizeof(name), version,

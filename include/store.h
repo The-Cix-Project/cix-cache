@@ -133,7 +133,21 @@ const char *store_suffix_of(const char *name);
  * tool on a laptop that has just downloaded a file -- gets it with one
  * GET rather than by parsing JSON.
  */
-#define STORE_SIG_SUFFIX ".iso.minisig"
+/*
+ * The tail a signature name ends in. A signature composes with ANY
+ * artifact suffix -- zlib-1.3.2-11-x86_64.tar.gz.minisig signs a
+ * package exactly as cix-installer-2.5.1-1-x86_64.iso.minisig signs an
+ * installer -- so what identifies one is this tail, not any single
+ * compound spelling of it.
+ *
+ * The compounds themselves stay explicit in the suffix table, and must.
+ * Registering a bare ".minisig" would let it match
+ * "...-x86_64.tar.gz.minisig" as the whole suffix, leaving ".tar.gz"
+ * inside the stem -- and every stem consumer downstream then reads "gz"
+ * as part of the release or the architecture. That does not fail, it
+ * mis-stamps, which is worse.
+ */
+#define STORE_SIG_EXT ".minisig"
 
 /* True for a signature object rather than something to install or boot. */
 int store_is_signature(const char *name);
@@ -146,8 +160,16 @@ int store_is_signature(const char *name);
 int store_needs_signature(const char *name);
 
 /*
- * Builds the signature name for an artifact. Returns 0, or -1 if the
- * artifact is not one that carries a signature.
+ * Builds the signature name for an artifact: <name>.minisig. Returns 0,
+ * or -1 for a name that is not a valid artifact, or is itself a
+ * signature.
+ *
+ * Deliberately NOT gated on store_needs_signature(). Whether an
+ * artifact is REQUIRED to be signed and whether it CAN be is a
+ * different question: only a bootable is refused for being unsigned,
+ * but any artifact may carry a signature, and packages now do
+ * (cix ADR-0279). Gating this on the requirement meant a package's
+ * signature could not be named even once it existed.
  */
 int store_signature_name(const char *name, char *out, size_t out_size);
 
