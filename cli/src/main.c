@@ -472,7 +472,7 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 	}
 	if (path == NULL || name == NULL || digest == NULL) {
 		fprintf(stderr,
-		        "usage: cix cache publish FILE --name=NAME.tar.gz "
+		        "usage: cix cache publish FILE --name=NAME.SUFFIX "
 		        "--sha256=HEX [--token=TOK]\n");
 		return 2;
 	}

@@ -853,15 +853,16 @@ static void test_cixpkg(void)
 	      "a cixpkg's signature is named from the cixpkg");
 
 	/*
-	 * Today's answer, and deliberately asserted as today's rather than
-	 * as settled: whether the store should REFUSE an unsigned .cixpkg
-	 * the way it refuses an unsigned .iso is itdlabs/cix-cache#15, and
-	 * an unsigned package being accepted is what every package does
-	 * now. If #15 decides otherwise, this line is the one that fails,
-	 * which is the point of writing it down.
+	 * The DEFAULT, which #15 settled as "what the store did before":
+	 * require_signature is `.iso` unless an operator says otherwise,
+	 * so an unsigned .cixpkg is accepted exactly as an unsigned
+	 * .tar.gz is. A store configured to demand one is asserted
+	 * separately in test_signature_policy(), which restores this
+	 * default afterwards precisely so this line still means what it
+	 * says whatever order the tests run in.
 	 */
 	CHECK(!store_needs_signature("zstd-1.5.7-3-x86_64.cixpkg"),
-	      "an unsigned .cixpkg is accepted, as an unsigned package is (pending #15)");
+	      "an unsigned .cixpkg is accepted by default, as an unsigned package is");
 
 	/* The stem is the identity, and the suffix is not part of it. */
 	store_split_display("zstd-1.5.7-3-x86_64.tar.gz", pn, sizeof(pn), pv, sizeof(pv), &pr, pa,
