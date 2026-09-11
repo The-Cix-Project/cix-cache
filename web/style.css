@@ -374,7 +374,14 @@ main[hidden] {
  * it gets a little more than the bare mark did.
  */
 .brand .mark {
-	height: 1.45rem;
+	/*
+	 * 0.825rem to match the cix web console's own .header-mark exactly,
+	 * so the two products wear the mark at one size rather than at two
+	 * that are nearly the same. A height, not spacing -- the 8px grid
+	 * (ADR-0011) governs gaps and padding, and an icon dimension is
+	 * governed by the brand's iconography rules instead.
+	 */
+	height: 0.825rem;
 	width: auto;
 	display: block;
 }
