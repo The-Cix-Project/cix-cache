@@ -791,10 +791,14 @@ static void begin_upload(struct conn *cc, const struct http_request *req, const 
 
 /* ---- api ---- */
 
+/*
+ * The counters behind /api/v1/status, accumulated by count_entry over
+ * store_walk(). Deliberately NOT the shape /api/v1/artifacts reports:
+ * these are per-file totals the daemon and the operator read, and
+ * grouping the listing by identity (#14) did not change what "N
+ * packages" on disk means.
+ */
 struct list_ctx {
-	struct json_writer *w;
-	/* Set per entry before list_entry(), which has a fixed signature. */
-	int version_rank;
 	long count;
 	/*
 	 * Published entries carrying no architecture. Every push from a
@@ -860,104 +864,206 @@ static long distinct_names(struct list_ctx *lc)
 	return distinct;
 }
 
-static int list_entry(const char *name, const char *digest, off_t size, time_t mtime, void *ctx)
+/*
+ * The stem of a published name: everything before the suffix the store
+ * recognises. Two encodings of one artifact -- zstd-1.5.7-3-x86_64
+ * as .tar.gz and as .cixpkg -- share it exactly, which is what makes
+ * it the identity these records are grouped on.
+ */
+static void stem_of(const char *name, char *out, size_t out_size)
 {
-	struct list_ctx *lc = ctx;
+	const char *suffix = store_suffix_of(name);
+	size_t len = suffix != NULL ? strlen(name) - strlen(suffix) : strlen(name);
 
+	if (len >= out_size)
+		len = out_size - 1;
+	memcpy(out, name, len);
+	out[len] = '\0';
+}
+
+/*
+ * One identity, and every encoding of it the store holds.
+ *
+ * The listing is grouped rather than flat because a format change is
+ * not a new artifact: while Cix migrates from .tar.gz to .cixpkg both
+ * encodings of one identity coexist, and as flat rows they shared
+ * artifact, version, release, arch AND version_rank, differing only in
+ * name and digest. A consumer grouping by identity -- which is what
+ * version_rank exists to order -- would have seen a shape it had never
+ * seen. See docs/adr/0012-cixpkg.md and #14.
+ */
+struct identity {
+	char stem[STORE_NAME_MAX];
+	/* Members are ents[first .. first + n), contiguous after sorting. */
+	int first;
+	int n;
+	long long bytes;
+	time_t modified;
+	int version_rank;
+};
+
+/*
+ * Groups by stem, then by whole name so the encodings of one identity
+ * come out in a stable order rather than readdir's.
+ */
+static int cmp_by_stem(const void *a, const void *b)
+{
+	const struct store_entry *x = *(struct store_entry *const *)a;
+	const struct store_entry *y = *(struct store_entry *const *)b;
+	char xs[STORE_NAME_MAX];
+	char ys[STORE_NAME_MAX];
+	int r;
+
+	stem_of(x->name, xs, sizeof(xs));
+	stem_of(y->name, ys, sizeof(ys));
+	r = strcmp(xs, ys);
+	if (r != 0)
+		return r;
+	return strcmp(x->name, y->name);
+}
+
+/* Most recently published first, ties on the stem: store_cmp_newest's
+ * rule, applied to an identity rather than a file. */
+static int cmp_identity_newest(const void *a, const void *b)
+{
+	const struct identity *x = a;
+	const struct identity *y = b;
+
+	if (x->modified != y->modified)
+		return x->modified < y->modified ? 1 : -1;
+	return strcmp(x->stem, y->stem);
+}
+
+/*
+ * The encodings of one identity, as the "formats" array.
+ *
+ * Per-format because this is where the facts differ: a .cixpkg and a
+ * .tar.gz of one artifact are different bytes with different digests,
+ * different sizes, and signatures of their own. Nothing that differs
+ * per encoding is hoisted to the record, and nothing that identifies
+ * the artifact is repeated inside it.
+ */
+static void write_formats(struct json_writer *w, struct store_entry **ents, int first, int n)
+{
+	int i;
+
+	jw_key(w, "formats");
+	jw_arr_open(w);
+	for (i = first; i < first + n; i++) {
+		const struct store_entry *e = ents[i];
+		const char *suffix = store_suffix_of(e->name);
+		char sig[STORE_NAME_MAX];
+		char found[STORE_SHA256_MAX];
+		int has = store_signature_name(e->name, sig, sizeof(sig)) == 0 &&
+		          store_resolve(sig, found, sizeof(found)) == STORE_OK;
+
+		jw_obj_open(w);
+		/*
+		 * The suffix as the store spells it, so a client selects a
+		 * format by comparing this rather than by re-deriving it from
+		 * the name -- which is the whole reason the last dot is not
+		 * good enough here (".tar.gz" ends in ".gz").
+		 */
+		jw_key(w, "format");
+		jw_str(w, suffix != NULL ? suffix : "");
+		/*
+		 * The name is per format and not per identity, because the
+		 * name is the URL: this is what a client GETs. The identity
+		 * above it is not fetchable and deliberately has no URL.
+		 */
+		jw_key(w, "name");
+		jw_str(w, e->name);
+		/*
+		 * Same rule as before grouping: reported when the artifact
+		 * either requires a signature or carries one, and omitted
+		 * rather than false when signing is not a thing it does.
+		 * Hundreds of packages predate signing (cix ADR-0279) and
+		 * "false" on every one would read as failure rather than as
+		 * work not yet done. Asked per encoding, since each carries
+		 * its own detached signature.
+		 */
+		if (store_needs_signature(e->name) || has) {
+			jw_key(w, "signed");
+			jw_bool(w, has);
+		}
+		jw_key(w, "sha256");
+		jw_str(w, e->digest);
+		jw_key(w, "bytes");
+		jw_int(w, (long long)e->size);
+		jw_key(w, "modified");
+		jw_int(w, (long long)e->mtime);
+		jw_obj_close(w);
+	}
+	jw_arr_close(w);
+}
+
+static void write_identity(struct json_writer *w, const struct identity *id,
+                           struct store_entry **ents)
+{
 	char short_name[STORE_NAME_MAX];
 	char version[STORE_NAME_MAX];
 	char arch[STORE_NAME_MAX];
 	int release = 1;
 
 	/*
-	 * No url field: the URL is the name, at the root of base_url.
-	 * Sending both invites them to disagree, and the client can derive
-	 * one from the other.
+	 * No url field: a format's URL is its name, at the root of
+	 * base_url. Sending both invites them to disagree, and the client
+	 * can derive one from the other.
 	 *
-	 * artifact, version and release are split for display only --
-	 * name stays the authoritative key.
+	 * artifact, version and release are split for display only -- the
+	 * stem stays the authoritative key, as the name was before
+	 * grouping.
 	 *
 	 * release is reported as its own number so no consumer has to
 	 * re-parse the string to get at it, and version is upstream's
 	 * alone. A name carrying no release reports 1, which is what it
 	 * means.
 	 */
-	/*
-	 * A signature is not a row. It is a sibling object on disk and
-	 * fetchable by GET, but an ISO and its signature are one artifact
-	 * to anybody reading a list -- two rows would double the count and
-	 * teach nothing.
-	 *
-	 * Filtered HERE and never in store_walk(): store_gc() builds its
-	 * live set from that walk, so a walk that skipped signatures would
-	 * leave their blobs unreferenced and the next collection would
-	 * delete every one of them. The walk reports the store as it is;
-	 * presentation decides what to show.
-	 */
-	if (store_is_signature(name))
-		return 0;
-
-	store_split_display(name, short_name, sizeof(short_name), version, sizeof(version), &release,
-	                    arch, sizeof(arch));
-	jw_obj_open(lc->w);
-	jw_key(lc->w, "name");
-	jw_str(lc->w, name);
-	jw_key(lc->w, "artifact");
-	jw_str(lc->w, short_name);
-	jw_key(lc->w, "version");
-	jw_str(lc->w, version);
-	jw_key(lc->w, "release");
-	jw_int(lc->w, release);
+	store_split_display(id->stem, short_name, sizeof(short_name), version, sizeof(version),
+	                    &release, arch, sizeof(arch));
+	jw_obj_open(w);
+	jw_key(w, "stem");
+	jw_str(w, id->stem);
+	jw_key(w, "artifact");
+	jw_str(w, short_name);
+	jw_key(w, "version");
+	jw_str(w, version);
+	jw_key(w, "release");
+	jw_int(w, release);
 	/*
 	 * Empty for an artifact that names no architecture. Reported as
 	 * absent rather than guessed, because the store genuinely does not
 	 * know -- see ADR-0008.
 	 */
-	jw_key(lc->w, "arch");
-	jw_str(lc->w, arch);
+	jw_key(w, "arch");
+	jw_str(w, arch);
 	/*
 	 * Position in version order, computed here so there is exactly one
 	 * implementation of the ordering rules (store_version_cmp). A
 	 * browser sorting on this number cannot disagree with the server
 	 * about what "newer" means, which a second comparator in
 	 * JavaScript eventually would.
+	 *
+	 * Ranked over identities and not over files, which is what makes
+	 * it identify a row again: two encodings of one artifact are one
+	 * rank, not two entries fighting for the same one.
 	 */
-	jw_key(lc->w, "version_rank");
-	jw_int(lc->w, lc->version_rank);
+	jw_key(w, "version_rank");
+	jw_int(w, id->version_rank);
+	write_formats(w, ents, id->first, id->n);
 	/*
-	 * Only for artifacts that carry one, so a package is not implicitly
-	 * described as unsigned when signing is not a thing it does.
+	 * Aggregates, and only the ones that can be aggregated honestly.
+	 * bytes is what this identity costs on disk across every encoding
+	 * of it; modified is the most recent publish among them. There is
+	 * deliberately no identity-level sha256: one digest standing for
+	 * two different blobs would be a lie, and a client that wants one
+	 * wants a format's.
 	 */
-	{
-		char sig[STORE_NAME_MAX];
-		char found[STORE_SHA256_MAX];
-		int has = store_signature_name(name, sig, sizeof(sig)) == 0 &&
-		          store_resolve(sig, found, sizeof(found)) == STORE_OK;
-
-		/*
-		 * Reported when the artifact either requires a signature or
-		 * actually carries one. A package that has not been signed
-		 * yet reports nothing rather than false: signing packages is
-		 * additive (cix ADR-0279) and hundreds predate it, so "false"
-		 * on every one of them would read as failure rather than as
-		 * work not yet done.
-		 */
-		if (store_needs_signature(name) || has) {
-			jw_key(lc->w, "signed");
-			jw_bool(lc->w, has);
-		}
-	}
-	jw_key(lc->w, "sha256");
-	jw_str(lc->w, digest);
-	jw_key(lc->w, "bytes");
-	jw_int(lc->w, (long long)size);
-	jw_key(lc->w, "modified");
-	jw_int(lc->w, (long long)mtime);
-	jw_obj_close(lc->w);
-	lc->count++;
-	if (size > 0)
-		lc->bytes += (long long)size;
-	return 0;
+	jw_key(w, "bytes");
+	jw_int(w, id->bytes);
+	jw_key(w, "modified");
+	jw_int(w, (long long)id->modified);
+	jw_obj_close(w);
 }
 
 static int count_entry(const char *name, const char *digest, off_t size, time_t mtime, void *ctx)
@@ -1128,54 +1234,151 @@ static void api_status(struct conn *cc)
 	free(pkgs.names);
 }
 
+/*
+ * Collects the published entries into one identity per stem.
+ *
+ * ents is the caller's array of pointers, sorted by stem so an
+ * identity's encodings are contiguous. Returns how many identities
+ * were built, and fills out_files with the entries behind them.
+ */
+static int build_identities(struct store_entry **ents, int n, struct identity *out)
+{
+	int g = 0;
+	int i;
+
+	for (i = 0; i < n; i++) {
+		char stem[STORE_NAME_MAX];
+
+		stem_of(ents[i]->name, stem, sizeof(stem));
+		if (g == 0 || strcmp(out[g - 1].stem, stem) != 0) {
+			memset(&out[g], 0, sizeof(out[g]));
+			snprintf(out[g].stem, sizeof(out[g].stem), "%s", stem);
+			out[g].first = i;
+			g++;
+		}
+		out[g - 1].n++;
+		if (ents[i]->size > 0)
+			out[g - 1].bytes += (long long)ents[i]->size;
+		if (ents[i]->mtime > out[g - 1].modified)
+			out[g - 1].modified = ents[i]->mtime;
+	}
+	return g;
+}
+
+/*
+ * Ranks identities by version, not files.
+ *
+ * The representative carries the STEM as its name, so the rank cannot
+ * depend on which encodings happen to exist: were it a whole filename,
+ * publishing a .cixpkg beside a .tar.gz could move an unrelated
+ * artifact's rank, because the comparator's final tiebreak is the name
+ * string. store_split_display() reads a stem exactly as it reads a
+ * name -- the suffix it would strip is simply already gone.
+ */
+static void rank_identities(struct identity *ids, int g)
+{
+	struct store_entry *reps = malloc((size_t)g * sizeof(*reps));
+	int i;
+
+	if (reps == NULL) {
+		/* Ranking is a nicety; leaving them equal is not a failure. */
+		for (i = 0; i < g; i++)
+			ids[i].version_rank = 0;
+		return;
+	}
+	for (i = 0; i < g; i++) {
+		memset(&reps[i], 0, sizeof(reps[i]));
+		snprintf(reps[i].name, sizeof(reps[i].name), "%s", ids[i].stem);
+	}
+	store_rank_versions(reps, g);
+	for (i = 0; i < g; i++)
+		ids[i].version_rank = reps[i].version_rank;
+	free(reps);
+}
+
 static void api_artifacts(struct conn *cc)
 {
 	struct json_writer w;
-	struct list_ctx lc;
+	struct store_entry *ents = NULL;
+	struct store_entry **live = NULL;
+	struct identity *ids = NULL;
+	long long bytes = 0;
+	int n;
+	int files = 0;
+	int g = 0;
+	int i;
 
 	jw_init(&w);
-	memset(&lc, 0, sizeof(lc));
-	lc.w = &w;
 	jw_obj_open(&w);
 	jw_key(&w, "artifacts");
 	jw_arr_open(&w);
-	/*
-	 * Most recently published first. The dashboard is search-first, so
-	 * finding a known name is the search box's job and the list is
-	 * free to answer the other question an operator has: what landed.
-	 *
-	 * Sorted here rather than in the dashboard and the CLI separately,
-	 * so every consumer of this endpoint sees one order.
-	 */
-	{
-		struct store_entry *ents = NULL;
-		int n = store_list(&ents);
-		int i;
-
-		if (n > 0) {
-			/*
-			 * Ranked before the output order is chosen, over the
-			 * whole set, so the rank means the same thing however
-			 * the client then filters or re-sorts.
-			 */
-			store_rank_versions(ents, n);
-			qsort(ents, (size_t)n, sizeof(*ents), store_cmp_newest);
-			for (i = 0; i < n; i++) {
-				lc.version_rank = ents[i].version_rank;
-				list_entry(ents[i].name, ents[i].digest, ents[i].size, ents[i].mtime, &lc);
-			}
-		}
-		free(ents);
+	n = store_list(&ents);
+	if (n > 0) {
+		live = malloc((size_t)n * sizeof(*live));
+		ids = malloc((size_t)n * sizeof(*ids));
 	}
+	if (live != NULL && ids != NULL) {
+		/*
+		 * A signature is not a row of its own. It is a sibling object
+		 * on disk and fetchable by GET, but an artifact and its
+		 * signature are one thing to anybody reading a list -- and
+		 * since grouping, saying "signed" on the format it signs is
+		 * strictly more useful than a row nobody can read.
+		 *
+		 * Filtered HERE and never in store_walk(): store_gc() builds
+		 * its live set from that walk, so a walk that skipped
+		 * signatures would leave their blobs unreferenced and the next
+		 * collection would delete every one of them. The walk reports
+		 * the store as it is; presentation decides what to show.
+		 */
+		for (i = 0; i < n; i++)
+			if (!store_is_signature(ents[i].name))
+				live[files++] = &ents[i];
+		qsort(live, (size_t)files, sizeof(*live), cmp_by_stem);
+		g = build_identities(live, files, ids);
+		/*
+		 * Ranked before the output order is chosen, over the whole
+		 * set, so the rank means the same thing however the client
+		 * then filters or re-sorts.
+		 */
+		rank_identities(ids, g);
+		/*
+		 * Most recently published first. The dashboard is
+		 * search-first, so finding a known name is the search box's
+		 * job and the list is free to answer the other question an
+		 * operator has: what landed.
+		 *
+		 * Sorted here rather than in the dashboard and the CLI
+		 * separately, so every consumer of this endpoint sees one
+		 * order.
+		 */
+		qsort(ids, (size_t)g, sizeof(*ids), cmp_identity_newest);
+		for (i = 0; i < g; i++) {
+			write_identity(&w, &ids[i], live);
+			bytes += ids[i].bytes;
+		}
+	}
+	free(ids);
+	free(live);
+	free(ents);
 	jw_arr_close(&w);
+	/*
+	 * count is records, which is now identities rather than files, so
+	 * "files" carries the number it used to mean. Both are reported
+	 * because they are different facts and stopped being the same one
+	 * the moment an artifact could exist in two encodings -- and a
+	 * consumer reading "count" as a file count would otherwise be
+	 * quietly wrong rather than visibly broken.
+	 */
 	jw_key(&w, "count");
-	jw_int(&w, lc.count);
+	jw_int(&w, g);
+	jw_key(&w, "files");
+	jw_int(&w, files);
 	jw_key(&w, "bytes");
-	jw_int(&w, lc.bytes);
+	jw_int(&w, bytes);
 	jw_obj_close(&w);
 	respond_json(cc, 200, &w);
 	jw_free(&w);
-	free(lc.names);
 }
 
 static void api_gc(struct conn *cc, int dry_run)

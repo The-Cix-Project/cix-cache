@@ -252,6 +252,102 @@ int main(void)
 		CHECK(atoi(installers) == 0, "a .cixpkg counts as a package, never as an installer");
 	}
 
+	/*
+	 * The listing groups by identity (#14).
+	 *
+	 * Two encodings of one artifact are one row carrying both, not two
+	 * rows agreeing on everything but the name. Asserted against the
+	 * raw JSON rather than a parsed shape, because the exact spelling
+	 * is the contract two other consumers read.
+	 */
+	{
+		char tgz_path[300];
+		char tgz_digest[128];
+		char c[900];
+		char got[64];
+
+		/* The same identity, in the other encoding. */
+		snprintf(tgz_path, sizeof(tgz_path), "%s/zstd.tar.gz", ts.root);
+		ts_make_file(tgz_path, 2048);
+		CHECK(ts_sha256(tgz_path, tgz_digest, sizeof(tgz_digest)) == 0, "hash the tarball fixture");
+		CHECK(publish(&ts, tgz_path, "zstd-1.5.7-3-x86_64.tar.gz", tgz_digest) == 201,
+		      "the same identity publishes in a second encoding");
+
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/artifacts' "
+		         "| grep -o '\"stem\":\"zstd-1.5.7-3-x86_64\"' | wc -l",
+		         PORT);
+		CHECK(ts_capture(c, got, sizeof(got)) == 0 && atoi(got) == 1,
+		      "one record for the identity, not one per encoding");
+
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/artifacts' "
+		         "| grep -o '\"name\":\"zstd-1.5.7-3-x86_64[.a-z]*\"' | wc -l",
+		         PORT);
+		CHECK(ts_capture(c, got, sizeof(got)) == 0 && atoi(got) == 2,
+		      "and it carries both encodings as formats");
+
+		/*
+		 * The whole point of grouping: version_rank identifies a row
+		 * again. Ranked over identities, two encodings of one artifact
+		 * cannot collide on it.
+		 */
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/artifacts' | grep -o '\"version_rank\":[0-9]*' "
+		         "| sort | uniq -d | wc -l",
+		         PORT);
+		CHECK(ts_capture(c, got, sizeof(got)) == 0 && atoi(got) == 0,
+		      "no two identities share a version_rank");
+		/*
+		 * Paired with the duplicate check, which counts duplicate
+		 * lines and would be satisfied by a pattern that matched
+		 * nothing at all.
+		 */
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/artifacts' | grep -o '\"version_rank\":[0-9]*' "
+		         "| wc -l",
+		         PORT);
+		CHECK(ts_capture(c, got, sizeof(got)) == 0 && atoi(got) == 2,
+		      "and there is one rank per identity to compare");
+
+		/*
+		 * count changed meaning, so files carries the one it used to
+		 * have. A consumer reading either must be able to tell them
+		 * apart, which it cannot if they are always equal in tests.
+		 */
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/artifacts' | tr ',' '\n' "
+		         "| grep '\"count\"' | cut -d: -f2",
+		         PORT);
+		ts_capture(c, got, sizeof(got));
+		CHECK(atoi(got) == 2, "count is identities: the tarball's and zstd's");
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/artifacts' | tr ',' '\n' "
+		         "| grep '\"files\"' | cut -d: -f2",
+		         PORT);
+		ts_capture(c, got, sizeof(got));
+		CHECK(atoi(got) == 3, "files is what is on disk, which is one more");
+
+		/*
+		 * The signed rule survived being moved inside a format: the
+		 * signed .cixpkg says so, and the unsigned .tar.gz beside it
+		 * says nothing rather than false. Checked by what follows the
+		 * name in the emitted object.
+		 */
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/artifacts' "
+		         "| grep -c '\"name\":\"zstd-1.5.7-3-x86_64.cixpkg\",\"signed\":true'",
+		         PORT);
+		CHECK(ts_capture(c, got, sizeof(got)) == 0 && atoi(got) == 1,
+		      "the signed encoding reports it");
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/artifacts' "
+		         "| grep -c '\"name\":\"zstd-1.5.7-3-x86_64.tar.gz\",\"sha256\"'",
+		         PORT);
+		CHECK(ts_capture(c, got, sizeof(got)) == 0 && atoi(got) == 1,
+		      "and the unsigned one beside it omits the field rather than saying false");
+	}
+
 	ts_stop(&ts);
 	if (g_failures == 0)
 		printf("test_serve: ok\n");

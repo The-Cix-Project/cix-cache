@@ -203,58 +203,97 @@ static int g_show_arch;
  */
 static int g_show_signed;
 
+/*
+ * Whether the format column is worth its width. Same rule again: while
+ * only one encoding exists the column repeats ".tar.gz" on every line
+ * and teaches nothing, so it appears the moment a second one does.
+ */
+static int g_show_format;
+
+static const struct json_value *formats_of(const struct json_value *v)
+{
+	const struct json_value *f = json_object_get(v, "formats");
+
+	return f != NULL && f->type == JSON_ARRAY ? f : NULL;
+}
+
+/*
+ * One line per encoding, with the identity columns printed once.
+ *
+ * A continuation line leaves artifact, version and release blank rather
+ * than repeating them: the repeat reads as two artifacts at a glance,
+ * which is the exact confusion grouping exists to remove. What differs
+ * per encoding -- the format, its size and its digest -- is what the
+ * continuation carries.
+ */
 static void fmt_artifact_line(const struct json_value *v)
 {
+	const struct json_value *formats = formats_of(v);
 	const char *version = str_field(v, "version");
-	time_t modified = (time_t)int_field(v, "modified");
-	char when[16] = "-";
-	char size[16];
-	struct tm tm;
+	const char *arch = str_field(v, "arch");
+	size_t i;
 
-	human_bytes(int_field(v, "bytes"), size, sizeof(size));
-	if (modified > 0) {
-		localtime_r(&modified, &tm);
-		strftime(when, sizeof(when), "%Y-%m-%d", &tm);
-	}
-	/*
-	 * Name, version and release in their own columns, and no URL
-	 * column: the URL is the name, at the root of base_url. Printing
-	 * both just makes the line too wide to read.
-	 *
-	 * The release is its own column rather than part of the version
-	 * because it is Cix's number, not upstream's -- 5.2.37 is what
-	 * the bash authors released, -2 is what we did to it.
-	 */
-	{
-		const char *arch = str_field(v, "arch");
-		char cols[64];
+	if (formats == NULL || formats->u.array.count == 0)
+		return;
+	for (i = 0; i < formats->u.array.count; i++) {
+		const struct json_value *f = formats->u.array.items[i];
+		time_t modified = (time_t)int_field(f, "modified");
+		char when[16] = "-";
+		char size[16];
+		char cols[80];
+		struct tm tm;
 		int n = 0;
 
+		human_bytes(int_field(f, "bytes"), size, sizeof(size));
+		if (modified > 0) {
+			localtime_r(&modified, &tm);
+			strftime(when, sizeof(when), "%Y-%m-%d", &tm);
+		}
 		cols[0] = '\0';
+		if (g_show_format)
+			n += snprintf(cols + n, sizeof(cols) - (size_t)n, "%-8s ", str_field(f, "format"));
 		if (g_show_arch)
 			n += snprintf(cols + n, sizeof(cols) - (size_t)n, "%-8s ",
 			              arch[0] != '\0' ? arch : "-");
 		/*
 		 * Blank rather than "no" for an artifact that carries no
 		 * signature at all: a package is not unsigned, signing is
-		 * simply not a thing it does.
+		 * simply not a thing it does. Read per encoding, because each
+		 * carries its own detached signature.
 		 */
 		if (g_show_signed) {
-			const struct json_value *sig = json_object_get(v, "signed");
+			const struct json_value *sig = json_object_get(f, "signed");
 
 			n += snprintf(cols + n, sizeof(cols) - (size_t)n, "%-6s ",
-			              sig == NULL ? "" : (bool_field(v, "signed") ? "yes" : "no"));
+			              sig == NULL ? "" : (bool_field(f, "signed") ? "yes" : "no"));
 		}
 		(void)n;
-		fprintf(g_out, "%-18s %12.12s %4lld %s %9s  %.12s  %10s\n", str_field(v, "artifact"),
-		        version[0] != '\0' ? version : "-", int_field(v, "release"), cols, size,
-		        str_field(v, "sha256"), when);
+		/*
+		 * Name, version and release in their own columns, and no URL
+		 * column: the URL is the format's name, at the root of
+		 * base_url. Printing both just makes the line too wide to
+		 * read.
+		 *
+		 * The release is its own column rather than part of the
+		 * version because it is Cix's number, not upstream's --
+		 * 5.2.37 is what the bash authors released, -2 is what we did
+		 * to it.
+		 */
+		if (i == 0)
+			fprintf(g_out, "%-18s %12.12s %4lld %s %9s  %.12s  %10s\n",
+			        str_field(v, "artifact"), version[0] != '\0' ? version : "-",
+			        int_field(v, "release"), cols, size, str_field(f, "sha256"), when);
+		else
+			fprintf(g_out, "%-18s %12s %4s %s %9s  %.12s  %10s\n", "", "", "", cols, size,
+			        str_field(f, "sha256"), when);
 	}
 }
 
 static void fmt_artifacts(const struct json_value *v)
 {
 	const struct json_value *arr = json_object_get(v, "artifacts");
+	long long count = int_field(v, "count");
+	long long files = int_field(v, "files");
 	char total[16];
 	size_t i;
 
@@ -262,18 +301,35 @@ static void fmt_artifacts(const struct json_value *v)
 		return;
 	g_show_arch = 0;
 	g_show_signed = 0;
+	g_show_format = 0;
 	for (i = 0; i < arr->u.array.count; i++) {
-		if (i > 0 && strcmp(str_field(arr->u.array.items[i], "arch"),
-		                    str_field(arr->u.array.items[0], "arch")) != 0)
+		const struct json_value *rec = arr->u.array.items[i];
+		const struct json_value *formats = formats_of(rec);
+		size_t j;
+
+		if (i > 0 && strcmp(str_field(rec, "arch"), str_field(arr->u.array.items[0], "arch")) != 0)
 			g_show_arch = 1;
-		if (json_object_get(arr->u.array.items[i], "signed") != NULL)
-			g_show_signed = 1;
+		if (formats == NULL)
+			continue;
+		/*
+		 * More than one encoding anywhere in the listing is what
+		 * earns the column -- not more than one on this row. A column
+		 * that appears halfway down a table is worse than one that is
+		 * always there.
+		 */
+		if (formats->u.array.count > 1)
+			g_show_format = 1;
+		for (j = 0; j < formats->u.array.count; j++)
+			if (json_object_get(formats->u.array.items[j], "signed") != NULL)
+				g_show_signed = 1;
 	}
 	{
-		char head[64];
+		char head[80];
 		int n = 0;
 
 		head[0] = '\0';
+		if (g_show_format)
+			n += snprintf(head + n, sizeof(head) - (size_t)n, "%-8s ", "FORMAT");
 		if (g_show_arch)
 			n += snprintf(head + n, sizeof(head) - (size_t)n, "%-8s ", "ARCH");
 		if (g_show_signed)
@@ -286,23 +342,48 @@ static void fmt_artifacts(const struct json_value *v)
 		fmt_artifact_line(arr->u.array.items[i]);
 	human_bytes(int_field(v, "bytes"), total, sizeof(total));
 	/*
-	 * Broken down when both kinds are present. Otherwise this total
+	 * Broken down when installers are present. Otherwise this total
 	 * and the one in `status` use the word "artifacts" for different
 	 * sets -- status counts packages and installers separately, this
 	 * listing shows both -- and the two numbers appear to disagree.
+	 *
+	 * Counted on the .iso format and not on the presence of `signed`,
+	 * which is what this did before. That test predates #12: once a
+	 * package could carry a signature too, every signed package
+	 * reported `signed` and was counted as an installer. The format is
+	 * what says which tier an artifact is in.
 	 */
-	if (g_show_signed) {
+	{
 		long long installers = 0;
 
 		for (i = 0; i < arr->u.array.count; i++) {
-			if (json_object_get(arr->u.array.items[i], "signed") != NULL)
-				installers++;
+			const struct json_value *formats = formats_of(arr->u.array.items[i]);
+			size_t j;
+
+			if (formats == NULL)
+				continue;
+			for (j = 0; j < formats->u.array.count; j++)
+				if (strcmp(str_field(formats->u.array.items[j], "format"), ".iso") == 0) {
+					installers++;
+					break;
+				}
 		}
-		fprintf(g_out, "\n%lld artifacts (%lld packages, %lld installers), %s\n",
-		        int_field(v, "count"), int_field(v, "count") - installers, installers, total);
-		return;
+		if (installers > 0) {
+			fprintf(g_out, "\n%lld artifacts (%lld packages, %lld installers), %s\n", count,
+			        count - installers, installers, total);
+			return;
+		}
 	}
-	fprintf(g_out, "\n%lld artifacts, %s\n", int_field(v, "count"), total);
+	/*
+	 * Artifacts and files are different numbers once one artifact can
+	 * exist in two encodings, so both are shown rather than one
+	 * standing in for the other. While every artifact has a single
+	 * encoding they are equal and saying it twice teaches nothing.
+	 */
+	if (files > count)
+		fprintf(g_out, "\n%lld artifacts in %lld files, %s\n", count, files, total);
+	else
+		fprintf(g_out, "\n%lld artifacts, %s\n", count, total);
 }
 
 static void fmt_log(const struct json_value *v)

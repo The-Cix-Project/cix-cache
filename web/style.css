@@ -1058,3 +1058,22 @@ th.sortable[aria-sort="descending"]::after {
 .show-signed .signed-col {
 	display: table-cell;
 }
+
+/* And again: while one encoding exists it repeats ".tar.gz" down the page. */
+.format-col {
+	display: none;
+}
+
+.show-format .format-col {
+	display: table-cell;
+}
+
+/*
+ * One line per encoding, in every column that carries a per-encoding
+ * fact. The line box is what keeps format, signature, size and digest
+ * reading across: they are stacked in the same order and so line up
+ * without any of them knowing about the others.
+ */
+.stack-line + .stack-line {
+	margin-top: 2px;
+}

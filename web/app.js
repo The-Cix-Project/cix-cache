@@ -134,9 +134,24 @@ async function refreshLog() {
 
 /* ---------- results ---------- */
 
-/* The URL is the name, at the root of base_url. */
-function artifactUrl(a) {
-	return "/" + a.name;
+/* The URL is a FORMAT's name, at the root of base_url. An identity is
+ * not fetchable -- what you download is one encoding of it. */
+function formatUrl(f) {
+	return "/" + f.name;
+}
+
+/* The encodings of an identity, in the order the server sent them. */
+function formatsOf(a) {
+	return a.formats || [];
+}
+
+/*
+ * The encoding a row links to when the format column is not showing.
+ * First rather than chosen: the server sorts formats by name, so this
+ * is stable, and while only one encoding exists it is the only one.
+ */
+function primaryFormat(a) {
+	return formatsOf(a)[0];
 }
 
 /*
@@ -171,7 +186,18 @@ function matches(a) {
 	 */
 	if (a.version !== "" && (a.version + "-" + a.release).indexOf(needle) >= 0)
 		return true;
-	return a.sha256.indexOf(needle) === 0;
+	/*
+	 * Every encoding, not just the first: searching "cixpkg" has to
+	 * find the artifact published as one, and a digest belongs to a
+	 * format rather than to the identity above it.
+	 */
+	for (const f of formatsOf(a)) {
+		if (f.format.toLowerCase().indexOf(needle) >= 0)
+			return true;
+		if (f.sha256.indexOf(needle) === 0)
+			return true;
+	}
+	return false;
 }
 
 function copyDigest(digest) {
@@ -181,20 +207,44 @@ function copyDigest(digest) {
 			() => logLine("could not copy to clipboard", "err"));
 }
 
+/*
+ * A cell holding one line per encoding.
+ *
+ * Every stacked column emits its lines in the same order, so format,
+ * signature, size and digest read across as rows within the row. A
+ * single-encoding artifact gets exactly one line and looks like it
+ * always did.
+ */
+function stackedCell(a, className, build) {
+	const cell = document.createElement("td");
+
+	cell.className = className;
+	for (const f of formatsOf(a)) {
+		const line = document.createElement("div");
+
+		line.className = "stack-line";
+		build(line, f);
+		cell.appendChild(line);
+	}
+	return cell;
+}
+
 function resultRow(a) {
 	const row = document.createElement("tr");
+	const primary = primaryFormat(a);
 
 	/*
 	 * The name is the link, so the URL is not repeated in a column of
 	 * its own. Hovering shows the full filename, which is what the
-	 * store is actually keyed by.
+	 * store is actually keyed by -- every one of them when the
+	 * artifact exists in more than one encoding.
 	 */
 	const nameCell = document.createElement("td");
 	const link = document.createElement("a");
 	link.className = "mono";
-	link.href = artifactUrl(a);
+	link.href = primary ? formatUrl(primary) : "#";
 	link.textContent = a.artifact;
-	link.title = a.name;
+	link.title = formatsOf(a).map((f) => f.name).join("\n");
 	nameCell.appendChild(link);
 	row.appendChild(nameCell);
 
@@ -214,6 +264,20 @@ function resultRow(a) {
 	relCell.textContent = a.release;
 	row.appendChild(relCell);
 
+	/*
+	 * Each encoding links to its own URL. That is the point of the
+	 * column: with two of them the name above can only point at one,
+	 * and the other would be unreachable from the page.
+	 */
+	row.appendChild(stackedCell(a, "mono rel format-col", (line, f) => {
+		const a2 = document.createElement("a");
+
+		a2.href = formatUrl(f);
+		a2.textContent = f.format;
+		a2.title = f.name;
+		line.appendChild(a2);
+	}));
+
 	const archCell = document.createElement("td");
 
 	archCell.className = "mono num rel arch-col";
@@ -221,32 +285,36 @@ function resultRow(a) {
 	row.appendChild(archCell);
 
 	/*
-	 * Only bootables carry one, so a package shows nothing rather than
-	 * being described as unsigned -- signing is not a thing it does.
+	 * Only what carries one says anything, so a package shows blank
+	 * rather than being described as unsigned -- signing is not a
+	 * thing it does. Per encoding, because each has its own detached
+	 * signature and one can be signed while the other is not.
 	 */
-	const signedCell = document.createElement("td");
+	row.appendChild(stackedCell(a, "num rel signed-col", (line, f) => {
+		line.textContent = f.signed === undefined ? "" : (f.signed ? "yes" : "no");
+		if (f.signed === false)
+			line.style.color = "var(--error)";
+	}));
 
-	signedCell.className = "num rel signed-col";
-	signedCell.textContent = a.signed === undefined ? "" : (a.signed ? "yes" : "no");
-	if (a.signed === false)
-		signedCell.style.color = "var(--error)";
-	row.appendChild(signedCell);
+	row.appendChild(stackedCell(a, "num", (line, f) => {
+		line.textContent = f.bytes < 0 ? "dangling" : humanBytes(f.bytes);
+	}));
 
-	const sizeCell = document.createElement("td");
-	sizeCell.className = "num";
-	sizeCell.textContent = a.bytes < 0 ? "dangling" : humanBytes(a.bytes);
-	row.appendChild(sizeCell);
+	row.appendChild(stackedCell(a, "", (line, f) => {
+		const digest = document.createElement("span");
 
-	const digestCell = document.createElement("td");
-	const digest = document.createElement("span");
-	digest.className = "mono digest";
-	digest.textContent = a.sha256.substring(0, 16) + "…";
-	digest.title = a.sha256 + " (click to copy)";
-	digest.addEventListener("click", () => copyDigest(a.sha256));
-	digestCell.appendChild(digest);
-	row.appendChild(digestCell);
+		digest.className = "mono digest";
+		digest.textContent = f.sha256.substring(0, 16) + "\u2026";
+		digest.title = f.sha256 + " (click to copy)";
+		digest.addEventListener("click", () => copyDigest(f.sha256));
+		line.appendChild(digest);
+	}));
 
-	/* When this NAME was published here, not when the bytes were built. */
+	/*
+	 * When this artifact was last published here, not when the bytes
+	 * were built. One line even with two encodings: the row is what
+	 * landed, and the per-format dates are minutes apart at most.
+	 */
 	const whenCell = document.createElement("td");
 
 	whenCell.className = "muted num";
@@ -335,20 +403,32 @@ function sortCmp(a, b) {
 	} else if (k === "arch") {
 		r = (a.arch || "").localeCompare(b.arch || "");
 	} else if (k === "signed") {
-		/* undefined last: those are artifacts the question does not apply to. */
-		const rank = (v) => (v === undefined ? 2 : v ? 1 : 0);
+		/*
+		 * undefined last: those are artifacts the question does not
+		 * apply to. Over every encoding, worst first -- one unsigned
+		 * format is what you want to see, whatever the others say.
+		 */
+		const rank = (x) => {
+			const fs = formatsOf(x);
 
-		r = rank(a.signed) - rank(b.signed);
+			if (fs.some((f) => f.signed === false))
+				return 0;
+			if (fs.some((f) => f.signed === true))
+				return 1;
+			return 2;
+		};
+
+		r = rank(a) - rank(b);
 	} else {
 		r = a.artifact.localeCompare(b.artifact, undefined, { numeric: true });
 	}
 	if (r !== 0)
 		return r * sort.dir;
 	/*
-	 * Names are unique, so this makes the order total. Without it,
+	 * Stems are unique, so this makes the order total. Without it,
 	 * equal keys leave rows free to swap places on every poll.
 	 */
-	return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+	return a.stem < b.stem ? -1 : a.stem > b.stem ? 1 : 0;
 }
 
 function applySortIndicators() {
@@ -433,10 +513,24 @@ function renderResults() {
 		let signable = 0;
 
 		for (i = 0; i < shown.length; i++) {
-			if (shown[i].signed !== undefined)
+			if (formatsOf(shown[i]).some((f) => f.signed !== undefined))
 				signable++;
 		}
 		el("results").classList.toggle("show-signed", signable > 0);
+
+		/*
+		 * And again for the format. While every artifact is a .tar.gz
+		 * the column repeats one word down the page; it earns its
+		 * place the moment an artifact exists in two encodings, which
+		 * is exactly when a row is ambiguous without it.
+		 */
+		let multi = 0;
+
+		for (i = 0; i < shown.length; i++) {
+			if (formatsOf(shown[i]).length > 1)
+				multi++;
+		}
+		el("results").classList.toggle("show-format", multi > 0);
 	}
 
 	const pages = Math.max(1, Math.ceil(shown.length / PAGE_SIZE));
@@ -449,7 +543,7 @@ function renderResults() {
 		const row = document.createElement("tr");
 		const cell = document.createElement("td");
 
-		cell.colSpan = 8;
+		cell.colSpan = 9;
 		cell.className = "empty";
 		/*
 		 * Name the architecture too. Otherwise a filter left on reads
@@ -484,7 +578,13 @@ function renderStatus() {
 	if (!s)
 		return;
 	/* Menu bar: what the registry holds. */
-	/* Four zlibs and three greps: packages and artifacts differ. */
+	/*
+	 * Four zlibs and three greps: distinct packages and published
+	 * files are different numbers. Both come from /api/v1/status,
+	 * which counts FILES and is deliberately not grouped the way the
+	 * listing is -- it is what the store holds, and two encodings of
+	 * one artifact really are two files on disk.
+	 */
 	setText("m-unique", String(s.unique_packages));
 	setText("m-packages", String(s.packages));
 	/*

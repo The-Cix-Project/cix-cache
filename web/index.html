@@ -38,7 +38,13 @@
 	</svg>
 	</a>
 	<span class="stat"><b id="m-unique">&mdash;</b> packages</span>
-	<span class="stat"><b id="m-packages">&mdash;</b> artifacts</span>
+	<!--
+	  "files" and not "artifacts": since the listing groups by identity
+	  (#14) a row can stand for two files, and this counts what is on
+	  disk. Called artifacts, it would read as the row count and
+	  disagree with the table underneath it.
+	-->
+	<span class="stat"><b id="m-packages">&mdash;</b> files</span>
 	<span class="stat" id="m-installers-wrap" hidden><b id="m-installers">&mdash;</b> installers</span>
 	<span class="stat"><b id="m-bytes">&mdash;</b></span>
 	<span class="stat warn-stat" id="m-unstamped" title="Published with no architecture -- run cixcached --set-arch" hidden></span>
@@ -87,6 +93,12 @@
 							<th class="sortable" data-sort="artifact" tabindex="0" aria-sort="none">Artifact</th>
 							<th class="num sortable" data-sort="version" tabindex="0" aria-sort="none">Version</th>
 							<th class="num sortable" data-sort="release" tabindex="0" aria-sort="none">Rel</th>
+							<!--
+							  Not sortable: an artifact can hold several formats, so
+							  there is no one value to sort a row by. It is a column
+							  that says which encodings exist and links to each.
+							-->
+							<th class="format-col">Format</th>
 							<th class="num sortable arch-col" data-sort="arch" tabindex="0" aria-sort="none">Arch</th>
 							<th class="num sortable signed-col" data-sort="signed" tabindex="0" aria-sort="none">Signed</th>
 							<th class="num sortable" data-sort="bytes" tabindex="0" aria-sort="none">Size</th>
@@ -281,7 +293,7 @@ minisign -Vm cix-installer-2.2.0-1-x86_64.iso -p cix.pub</code></pre>
 		<table class="help-table">
 			<tr><td><span class="tag">GET</span></td><td><code>/MANIFEST.json</code></td><td>generated from the tree, never stored; <code>packages</code> and <code>installers</code> are separate sections</td></tr>
 			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/status</code></td><td>counts, uptime, hit/miss, config summary</td></tr>
-			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/artifacts</code></td><td>everything published, with <code>artifact</code>, <code>version</code> and <code>release</code> split out</td></tr>
+			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/artifacts</code></td><td>everything published, one record per artifact with its <code>formats</code> listed</td></tr>
 			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/log?after=&lt;seq&gt;</code></td><td>activity since a sequence number</td></tr>
 			<tr><td><span class="tag">GET</span></td><td><code>/api/v1/gc</code></td><td>dry run &mdash; what collection would remove</td></tr>
 			<tr><td><span class="tag warn">POST</span></td><td><code>/api/v1/gc</code></td><td>collect unreferenced blobs</td></tr>
