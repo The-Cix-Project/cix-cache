@@ -1207,10 +1207,23 @@ static void api_status(struct conn *cc)
 
 	jw_init(&w);
 	jw_obj_open(&w);
+	/*
+	 * A canonical artifact name: this store's own grammar applied to
+	 * the thing serving it, so the daemon is describable by the rules
+	 * it enforces. store_name_is_valid() accepts it with a suffix.
+	 */
 	jw_key(&w, "build_version");
 	jw_str(&w, CIXCACHE_BUILD_VERSION);
 	jw_key(&w, "build_time");
 	jw_str(&w, CIXCACHE_BUILD_TIME);
+	/*
+	 * Its own field and not part of the name above. A dirty tree is
+	 * not part of an artifact's identity, and folding it in would put
+	 * "dirty" exactly where the architecture goes -- which is the
+	 * mis-stamping ADR-0008 exists to prevent, done to ourselves.
+	 */
+	jw_key(&w, "build_dirty");
+	jw_bool(&w, CIXCACHE_BUILD_DIRTY);
 	jw_key(&w, "root");
 	jw_str(&w, store_root());
 	jw_key(&w, "uptime_seconds");
@@ -2039,7 +2052,8 @@ int main(int argc, char **argv)
 		else if (strcmp(argv[i], "--dry-run") == 0)
 			dry_run = 1;
 		else if (strcmp(argv[i], "--version") == 0) {
-			printf("cixcached %s (%s)\n", CIXCACHE_BUILD_VERSION, CIXCACHE_BUILD_TIME);
+			printf("%s%s  (built %s)\n", CIXCACHE_BUILD_VERSION,
+			       CIXCACHE_BUILD_DIRTY ? " [dirty tree]" : "", CIXCACHE_BUILD_TIME);
 			return 0;
 		} else if (strcmp(argv[i], "--help") == 0) {
 			usage(stdout);
@@ -2128,8 +2142,14 @@ int main(int argc, char **argv)
 		return 1;
 	}
 	g_started_ms = now_ms();
-	server_log("info", "cixcached %s serving %s on %s:%d", CIXCACHE_BUILD_VERSION, g_conf.root,
-	           g_conf.bind, g_conf.port);
+	/*
+	 * Said once at startup, and the dirty marker with it: a build from
+	 * an uncommitted tree is not the release its version names, and
+	 * the log is where somebody reading back from an incident looks.
+	 */
+	server_log("info", "%s%s serving %s on %s:%d", CIXCACHE_BUILD_VERSION,
+	           CIXCACHE_BUILD_DIRTY ? " (dirty tree)" : "", g_conf.root, g_conf.bind,
+	           g_conf.port);
 	fflush(stdout);
 
 	while (!g_stop) {

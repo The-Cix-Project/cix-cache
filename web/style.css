@@ -1059,6 +1059,15 @@ th.sortable[aria-sort="descending"]::after {
 	display: table-cell;
 }
 
+/*
+ * A build from a modified tree is not the release its version names.
+ * Coloured rather than annotated, because the status bar is read at a
+ * glance and an extra word there is read as part of the version.
+ */
+.dirty-build {
+	color: var(--warn);
+}
+
 /* And again: while one encoding exists it repeats ".tar.gz" down the page. */
 .format-col {
 	display: none;

@@ -4,6 +4,7 @@
  * build/test_store -- with no server involved.
  */
 #include "store.h"
+#include "version.h"
 
 #include <fcntl.h>
 #include <stdio.h>
@@ -948,6 +949,47 @@ static void test_signature_policy(void)
 }
 
 
+/*
+ * The daemon wears the grammar it enforces.
+ *
+ * cixcached reports its build as a canonical artifact name --
+ * <name>-<version>-<release>-<arch> -- rather than as `git describe`
+ * output, which the parser below read as one opaque version with no
+ * release and no architecture. This asserts the claim rather than
+ * trusting the Makefile that produces it: if the generated identity
+ * ever stops being something this store could name, the store is what
+ * says so.
+ */
+static void test_build_identity(void)
+{
+	char name[STORE_NAME_MAX];
+	char version[STORE_NAME_MAX];
+	char arch[64];
+	char named[STORE_NAME_MAX];
+	int release = 0;
+
+	/* A bare identity is not a published name; a suffix makes it one. */
+	snprintf(named, sizeof(named), "%s.tar.gz", CIXCACHE_BUILD_VERSION);
+	CHECK(store_name_is_valid(named), "the build identity is a name this store would accept");
+
+	store_split_display(named, name, sizeof(name), version, sizeof(version), &release, arch,
+	                    sizeof(arch));
+	CHECK(strcmp(name, "cix-cache") == 0, "it names the product");
+	CHECK(version[0] == 'v', "carries a version");
+	/*
+	 * The two fields git describe never produced. A release of 0 would
+	 * mean the arithmetic that derives it from the tag distance broke;
+	 * an empty arch would mean the identity is unstamped, which is the
+	 * thing ADR-0008 counts as dangerous in an artifact.
+	 */
+	CHECK(release >= 1, "a release, which is 1 at a tag and higher past one");
+	CHECK(arch[0] != '\0', "and an architecture, which git describe never gave it");
+	CHECK(store_arch_of(named, NULL, 0) != NULL, "so the store can read the arch back out");
+	/* No dot-separated hash left in the version, which is what this replaced. */
+	CHECK(strstr(version, "-g") == NULL, "and no abbreviated commit hiding in the version");
+}
+
+
 int main(void)
 {
 	char root[] = "/tmp/cixcache-test-store-XXXXXX";
@@ -978,6 +1020,7 @@ int main(void)
 	test_signatures();
 	test_cixpkg();
 	test_signature_policy();
+	test_build_identity();
 
 	if (g_failures == 0)
 		printf("test_store: ok\n");

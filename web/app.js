@@ -614,7 +614,21 @@ function renderStatus() {
 	setText("s-requests", s.requests + " req");
 	setText("s-served", humanBytes(s.served_bytes) + " served");
 	setText("s-uptime", "up " + humanDuration(s.uptime_seconds));
-	setText("s-build", s.build_version);
+	/*
+	 * The build identity, which is a canonical artifact name -- the
+	 * same grammar the store enforces on what it holds. A build from a
+	 * modified tree is marked rather than folded into that name: it is
+	 * not part of an identity, and it is worth seeing at a glance that
+	 * what is serving is not the release it claims to be.
+	 */
+	{
+		const build = el("s-build");
+
+		build.textContent = s.build_version;
+		build.title = "built " + s.build_time +
+			(s.build_dirty ? " from a modified working tree" : "");
+		build.classList.toggle("dirty-build", s.build_dirty === true);
+	}
 
 	/*
 	 * Misses alone with no hits at all is the signature of a registry

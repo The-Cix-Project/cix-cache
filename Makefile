@@ -36,17 +36,45 @@ $(BUILD):
 # Regenerated on every make invocation (.PHONY, not a real file
 # dependency) so cixcached always reports the commit it was actually
 # built from -- a stale version string would be worse than none.
-ifeq ($(strip $(CIXCACHE_VERSION)),)
-VERSION_CMD = git -C $(CURDIR) describe --tags --always --dirty 2>/dev/null || echo unknown
-else
-VERSION_CMD = echo '$(CIXCACHE_VERSION)'
-endif
-
+#
+# The identity is a CANONICAL ARTIFACT NAME, the same grammar this
+# store enforces on everything it holds: <name>-<version>-<release>-<arch>
+# (ADR-0007, ADR-0008). `git describe` produced "v2.17.1-7-g00f0b63",
+# which the store's own parser reads as one opaque version with no
+# release and no architecture -- so the daemon was the one thing in the
+# system not describable by the rules it enforces.
+#
+#   version   the release tag, verbatim, the way a package carries
+#             upstream's version
+#   release   the packaging revision OF that version: 1 at the tag, and
+#             one more for each commit past it, which is exactly what a
+#             release number means for a package whose upstream has not
+#             moved
+#   arch      uname -m, spelled as the store spells it
+#
+# A dirty tree is NOT folded into the name. It is not part of an
+# artifact's identity, and bending it in would put "dirty" where the
+# architecture goes; it is reported as its own fact instead.
 .PHONY: $(BUILD)/version.h
 $(BUILD)/version.h: | $(BUILD)
-	@printf '#ifndef VERSION_H\n#define VERSION_H\n#define CIXCACHE_BUILD_VERSION "%s"\n#define CIXCACHE_BUILD_TIME "%s"\n#endif /* VERSION_H */\n' \
-		"$$($(VERSION_CMD))" \
-		"$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > $@
+	@set -e; \
+	arch=$$(uname -m); \
+	dirty=0; \
+	if [ -n "$(strip $(CIXCACHE_VERSION))" ]; then \
+		ident='$(strip $(CIXCACHE_VERSION))'; \
+	elif tag=$$(git -C $(CURDIR) describe --tags --abbrev=0 2>/dev/null); then \
+		past=$$(git -C $(CURDIR) rev-list --count "$$tag"..HEAD); \
+		git -C $(CURDIR) diff-index --quiet HEAD -- 2>/dev/null || dirty=1; \
+		ident="cix-cache-$$tag-$$((past + 1))-$$arch"; \
+	elif git -C $(CURDIR) rev-parse --git-dir >/dev/null 2>&1; then \
+		past=$$(git -C $(CURDIR) rev-list --count HEAD 2>/dev/null || echo 0); \
+		git -C $(CURDIR) diff-index --quiet HEAD -- 2>/dev/null || dirty=1; \
+		ident="cix-cache-v0.0.0-$$((past + 1))-$$arch"; \
+	else \
+		ident="cix-cache-v0.0.0-1-$$arch"; \
+	fi; \
+	printf '#ifndef VERSION_H\n#define VERSION_H\n#define CIXCACHE_BUILD_VERSION "%s"\n#define CIXCACHE_BUILD_TIME "%s"\n#define CIXCACHE_BUILD_DIRTY %s\n#endif /* VERSION_H */\n' \
+		"$$ident" "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$dirty" > $@
 
 $(BUILD)/cixcached: src/main.c $(SERVER_SRCS) $(BUILD)/version.h | $(BUILD)
 	$(CC) $(CFLAGS) src/main.c $(SERVER_SRCS) -o $@
@@ -54,8 +82,11 @@ $(BUILD)/cixcached: src/main.c $(SERVER_SRCS) $(BUILD)/version.h | $(BUILD)
 $(BUILD)/cix-cache: cli/src/main.c $(CLIENT_SRCS) $(BUILD)/version.h | $(BUILD)
 	$(CC) $(CLIENT_CFLAGS) cli/src/main.c $(CLIENT_SRCS) -o $@
 
-$(BUILD)/test_store: test/test_store.c src/store.c | $(BUILD)
-	$(CC) $(CFLAGS) $^ -o $@
+# Depends on version.h: test_build_identity() asserts the daemon's own
+# build identity is a name this store would accept, which is a claim
+# about the generated header and not only about the parser.
+$(BUILD)/test_store: test/test_store.c src/store.c $(BUILD)/version.h | $(BUILD)
+	$(CC) $(CFLAGS) test/test_store.c src/store.c -o $@
 
 $(BUILD)/test_http: test/test_http.c src/http.c | $(BUILD)
 	$(CC) $(CFLAGS) $^ -o $@

@@ -64,6 +64,12 @@ only thing that can. A bare name resolves while exactly one architecture
 is published and **stops resolving** as soon as two are, rather than
 picking. See `docs/adr/0008-architecture-in-artifact-names.md`.
 
+The server wears this too. `cixcached` reports its build as
+`cix-cache-v2.18.0-1-x86_64` — a name this store would accept, with a
+release and an architecture — rather than as `git describe` output,
+which had no room for either. See
+`docs/adr/0013-the-daemon-wears-the-grammar-it-enforces.md`.
+
 A push under a non-canonical name is **stored canonically**, and a fetch
 under one is served as an **alias** of the canonical entry — one file,
 one checksum, both spellings resolving to it. So recipes written before
