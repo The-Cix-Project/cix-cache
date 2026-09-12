@@ -26,7 +26,7 @@ TESTS := $(BUILD)/test_store $(BUILD)/test_http $(BUILD)/test_serve $(BUILD)/tes
 
 PREFIX := /opt/cixcache
 
-.PHONY: all clean install
+.PHONY: all clean install test
 
 all: $(BUILD)/cixcached $(BUILD)/cix-cache $(TESTS)
 
@@ -80,6 +80,25 @@ $(BUILD)/test_push: test/test_push.c | $(BUILD)
 
 $(BUILD)/test_gc: test/test_gc.c | $(BUILD)
 	$(CC) $(CFLAGS) -Itest $< -o $@
+
+#
+# Runs every test binary and stops at the first failure.
+#
+# The list comes from TESTS, so it cannot drift from what is built --
+# README carried its own copy of it for a while and was missing
+# test_conf until somebody noticed (#17).
+#
+# `set -e` per recipe line is not enough: the loop is one line, so
+# without the explicit exit a failing test is followed by the next one
+# and make sees only the last exit status. That is the bug this target
+# replaces -- the documented shell loop reported success when an early
+# test had failed.
+#
+test: $(TESTS)
+	@for t in $(TESTS); do \
+		./$$t || exit 1; \
+	done
+	@echo "all tests passed"
 
 #
 # The Cix repository deliberately has no install target -- it deploys

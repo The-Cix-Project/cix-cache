@@ -1,5 +1,6 @@
 #include "conf.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,23 @@ void conf_defaults(struct conf *c)
 	 * docs/adr/0012-cixpkg-and-signature-policy.md.
 	 */
 	snprintf(c->require_signature, sizeof(c->require_signature), "%s", ".iso");
+}
+
+int conf_parse_port(const char *s, int *out)
+{
+	char *end;
+	long v;
+
+	if (s == NULL || *s == '\0')
+		return -1;
+	errno = 0;
+	v = strtol(s, &end, 10);
+	if (errno != 0 || end == s || *end != '\0')
+		return -1;
+	if (v < 1 || v > 65535)
+		return -1;
+	*out = (int)v;
+	return 0;
 }
 
 /*
@@ -129,8 +147,17 @@ int conf_load(struct conf *c, const char *path)
 	overlay(buf, "push_token=", c->push_token, sizeof(c->push_token));
 	overlay(buf, "pull_token=", c->pull_token, sizeof(c->pull_token));
 	overlay(buf, "require_signature=", c->require_signature, sizeof(c->require_signature));
-	if (conf_extract(buf, "port=", portbuf, sizeof(portbuf)) == 0)
-		c->port = atoi(portbuf);
+	/*
+	 * A port the file states and the parser cannot use is fatal to the
+	 * load, not silently ignored: the caller's default would then be
+	 * what gets served, on an address nobody configured.
+	 */
+	if (conf_extract(buf, "port=", portbuf, sizeof(portbuf)) == 0 &&
+	    conf_parse_port(portbuf, &c->port) != 0) {
+		fprintf(stderr, "cixcached: %s: port '%s' is not a number in 1-65535\n", path, portbuf);
+		free(buf);
+		return -1;
+	}
 	free(buf);
 	return 0;
 }

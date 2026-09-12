@@ -93,6 +93,51 @@ int main(void)
 	CHECK(strcmp(c.root, "cache") == 0 && strcmp(c.require_signature, ".iso") == 0,
 	      "and leaves the defaults exactly as they were");
 
+	/*
+	 * Port parsing (#16).
+	 *
+	 * atoi() could not fail, and its result was truncated into the
+	 * 16-bit port field, so a daemon asked for 99999 bound 34463 and
+	 * logged 99999 -- up, healthy, and unreachable at the configured
+	 * address, which by ADR-0005 means every host silently builds from
+	 * source.
+	 */
+	{
+		int port = -12345;
+
+		CHECK(conf_parse_port("8080", &port) == 0 && port == 8080, "an ordinary port parses");
+		CHECK(conf_parse_port("1", &port) == 0 && port == 1, "the bottom of the range");
+		CHECK(conf_parse_port("65535", &port) == 0 && port == 65535, "and the top of it");
+
+		port = -12345;
+		CHECK(conf_parse_port("banana", &port) == -1, "a word is not a port");
+		CHECK(port == -12345, "and a refused parse leaves the caller's value alone");
+		/* Each of these used to bind SOMETHING. */
+		CHECK(conf_parse_port("99999", &port) == -1,
+		      "a number past the field is refused, not wrapped to 34463");
+		CHECK(conf_parse_port("-1", &port) == -1, "nor wrapped to 65535");
+		CHECK(conf_parse_port("0", &port) == -1,
+		      "and 0 is refused rather than meaning 'any port the kernel likes'");
+		CHECK(conf_parse_port("8080x", &port) == -1,
+		      "trailing junk is an error, not a port with a suffix");
+		CHECK(conf_parse_port("", &port) == -1, "an empty value is not a port");
+		CHECK(conf_parse_port(NULL, &port) == -1, "nor is nothing at all");
+		CHECK(conf_parse_port("99999999999999999999", &port) == -1, "nor is an overflow");
+	}
+
+	/*
+	 * A port the file states and the parser will not take is fatal to
+	 * the load. Ignoring it would silently serve the DEFAULT port,
+	 * which is the same failure wearing a different number.
+	 */
+	snprintf(path, sizeof(path), "%s/cixcache.conf", dir);
+	CHECK(write_conf(path, "port=99999\n") == 0, "write a config with an unusable port");
+	conf_defaults(&c);
+	CHECK(conf_load(&c, path) == -1, "a stated-but-unusable port fails the load");
+	CHECK(write_conf(path, "port=8443\n") == 0, "write a config with a usable one");
+	conf_defaults(&c);
+	CHECK(conf_load(&c, path) == 0 && c.port == 8443, "and a usable one is applied");
+
 	if (g_failures == 0)
 		printf("test_conf: ok\n");
 	else

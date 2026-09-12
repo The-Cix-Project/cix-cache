@@ -160,12 +160,16 @@ make          # cixcached, cix-cache, and the tests
 make clean
 ```
 
-Tests are standalone binaries run by hand, against a real server on a
-dedicated port:
+Tests are standalone binaries, several of which drive a real server on
+a dedicated port:
 
 ```
-for t in store http conf manifest import serve push gc; do build/test_$t; done
+make test     # stops at the first failure
 ```
+
+They can be run individually too — `build/test_store` and the rest —
+but `make test` is the one that fails loudly, and it takes its list
+from the Makefile rather than from a copy of it here.
 
 ## Documentation
 

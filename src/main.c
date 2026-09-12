@@ -1985,8 +1985,15 @@ int main(int argc, char **argv)
 		if (strncmp(argv[i], "--config=", 9) == 0)
 			config_path = argv[i] + 9;
 	}
+	/*
+	 * conf_load() has already said what was wrong -- unreadable, or a
+	 * value it will not accept -- so this does not diagnose it again
+	 * and must not contradict it. It said "cannot read config" while
+	 * conf_load() was rejecting a perfectly readable file over a bad
+	 * port (#16).
+	 */
 	if (config_path != NULL && conf_load(&g_conf, config_path) != 0) {
-		fprintf(stderr, "cixcached: cannot read config %s\n", config_path);
+		fprintf(stderr, "cixcached: not starting: %s was not accepted\n", config_path);
 		return 1;
 	}
 	for (i = 1; i < argc; i++) {
@@ -1996,8 +2003,24 @@ int main(int argc, char **argv)
 			snprintf(g_conf.root, sizeof(g_conf.root), "%s", argv[i] + 7);
 		else if (strncmp(argv[i], "--bind=", 7) == 0)
 			snprintf(g_conf.bind, sizeof(g_conf.bind), "%s", argv[i] + 7);
-		else if (strncmp(argv[i], "--port=", 7) == 0)
-			g_conf.port = atoi(argv[i] + 7);
+		else if (strncmp(argv[i], "--port=", 7) == 0) {
+			/*
+			 * Refusing to start is the safe direction here, and the
+			 * opposite of the call made for require_signature above.
+			 * There, a bad entry is warned about and skipped, because
+			 * refusing to start takes the cache down over a typo.
+			 * Here, STARTING is the harmful outcome: a daemon on the
+			 * wrong port is indistinguishable from a healthy one, and
+			 * every host that cannot reach it silently builds from
+			 * source (ADR-0005). A daemon that refused to start says
+			 * so in systemctl status immediately.
+			 */
+			if (conf_parse_port(argv[i] + 7, &g_conf.port) != 0) {
+				fprintf(stderr, "cixcached: --port: '%s' is not a number in 1-65535\n",
+				        argv[i] + 7);
+				return 2;
+			}
+		}
 		else if (strncmp(argv[i], "--web-root=", 11) == 0)
 			snprintf(g_conf.web_root, sizeof(g_conf.web_root), "%s", argv[i] + 11);
 		else if (strncmp(argv[i], "--push-token=", 13) == 0)
