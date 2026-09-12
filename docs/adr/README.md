@@ -21,7 +21,7 @@ reasoning incoherent.
 | [0010](0010-installer-isos-are-served-and-signed.md) | Installer ISOs are served, and signed | accepted; refines 0006 |
 | [0011](0011-brand-typography-and-palette.md) | The dashboard follows the Cix brand system | accepted |
 | [0012](0012-cixpkg-and-signature-policy.md) | CIXPKG is a package format; the listing groups by identity; the signature rule is policy | accepted; refines 0006, 0009 and 0010 |
-| [0013](0013-the-daemon-wears-the-grammar-it-enforces.md) | The daemon's build identity is a canonical artifact name | accepted; refines 0007 and 0008 |
+| [0013](0013-the-daemon-wears-the-grammar-it-enforces.md) | The daemon's build identity is a canonical artifact name | accepted, amended in v2.18.1; refines 0007 and 0008 |
 
 Nothing is currently undecided. Work in flight is tracked in the issue
 tracker rather than here.

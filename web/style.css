@@ -1064,6 +1064,25 @@ th.sortable[aria-sort="descending"]::after {
  * Coloured rather than annotated, because the status bar is read at a
  * glance and an extra word there is read as part of the version.
  */
+/*
+ * The build fields, laid out like the columns they mirror rather than
+ * run together into one string.
+ */
+.build-group {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+}
+
+/*
+ * Release and architecture sit behind the version, the same ordering
+ * the table gives them: the version is what is being read, and these
+ * two qualify it.
+ */
+.build-minor {
+	opacity: 0.7;
+}
+
 .dirty-build {
 	color: var(--warn);
 }

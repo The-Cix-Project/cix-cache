@@ -1208,22 +1208,57 @@ static void api_status(struct conn *cc)
 	jw_init(&w);
 	jw_obj_open(&w);
 	/*
-	 * A canonical artifact name: this store's own grammar applied to
-	 * the thing serving it, so the daemon is describable by the rules
-	 * it enforces. store_name_is_valid() accepts it with a suffix.
+	 * The build, shaped exactly like a listing record, because it is
+	 * one: the identity is a canonical artifact name (ADR-0013) and
+	 * these are its fields.
+	 *
+	 * Split HERE, by store_split_display() -- the same parser that
+	 * splits every other name in this store. A consumer wanting the
+	 * release on its own must not re-derive it from the string, or
+	 * there would be a second implementation of a grammar this
+	 * project has exactly one of, and the hyphens in "cix-cache" are
+	 * precisely what a naive split gets wrong.
 	 */
-	jw_key(&w, "build_version");
-	jw_str(&w, CIXCACHE_BUILD_VERSION);
-	jw_key(&w, "build_time");
-	jw_str(&w, CIXCACHE_BUILD_TIME);
-	/*
-	 * Its own field and not part of the name above. A dirty tree is
-	 * not part of an artifact's identity, and folding it in would put
-	 * "dirty" exactly where the architecture goes -- which is the
-	 * mis-stamping ADR-0008 exists to prevent, done to ourselves.
-	 */
-	jw_key(&w, "build_dirty");
-	jw_bool(&w, CIXCACHE_BUILD_DIRTY);
+	{
+		char artifact[STORE_NAME_MAX];
+		char version[STORE_NAME_MAX];
+		char arch[STORE_NAME_MAX];
+		int release = 1;
+
+		store_split_display(CIXCACHE_BUILD_VERSION, artifact, sizeof(artifact), version,
+		                    sizeof(version), &release, arch, sizeof(arch));
+		jw_key(&w, "build");
+		jw_obj_open(&w);
+		/* The whole name, which stays the authoritative form. */
+		jw_key(&w, "identity");
+		jw_str(&w, CIXCACHE_BUILD_VERSION);
+		jw_key(&w, "artifact");
+		jw_str(&w, artifact);
+		/*
+		 * version and release apart, for the reason ADR-0007 gives
+		 * for keeping them apart everywhere else: the version is
+		 * upstream's and the release is ours. Run together they read
+		 * as one number nobody can find the seam in.
+		 */
+		jw_key(&w, "version");
+		jw_str(&w, version);
+		jw_key(&w, "release");
+		jw_int(&w, release);
+		jw_key(&w, "arch");
+		jw_str(&w, arch);
+		jw_key(&w, "time");
+		jw_str(&w, CIXCACHE_BUILD_TIME);
+		/*
+		 * Not part of the identity above, deliberately. A dirty tree
+		 * is not something an artifact name can carry, and folding it
+		 * in would put "dirty" exactly where the architecture goes --
+		 * the mis-stamping ADR-0008 exists to prevent, done to
+		 * ourselves.
+		 */
+		jw_key(&w, "dirty");
+		jw_bool(&w, CIXCACHE_BUILD_DIRTY);
+		jw_obj_close(&w);
+	}
 	jw_key(&w, "root");
 	jw_str(&w, store_root());
 	jw_key(&w, "uptime_seconds");

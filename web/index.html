@@ -423,7 +423,22 @@ minisign -Vm cix-installer-2.2.0-1-x86_64.iso -p cix.pub</code></pre>
 
 <!-- Status bar: what the server is DOING, second by second. -->
 <footer>
-	<span id="s-build">&mdash;</span>
+	<!--
+	  The build, in the same shape the table gives an artifact: the
+	  name, then version and release apart, then the architecture. Run
+	  together as one string there is no telling where the version ends
+	  and the release begins, which is the reason the listing has never
+	  run them together either.
+	-->
+	<span class="build-group" id="s-build">
+		<span id="s-build-artifact">&mdash;</span>
+		<span class="sep"></span>
+		<span id="s-build-version">&mdash;</span>
+		<span class="sep"></span>
+		<span id="s-build-release" class="build-minor">&mdash;</span>
+		<span class="sep"></span>
+		<span id="s-build-arch" class="build-minor">&mdash;</span>
+	</span>
 	<span class="sep"></span>
 	<span id="s-uptime">&mdash;</span>
 	<span class="spacer"></span>

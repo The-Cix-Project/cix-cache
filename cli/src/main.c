@@ -140,7 +140,26 @@ static int emit(struct cix_response *r, int json_mode, void (*fmt)(const struct 
 
 static void fmt_status(const struct json_value *v)
 {
-	fprintf(g_out, "build:     %s (%s)\n", str_field(v, "build_version"), str_field(v, "build_time"));
+	/*
+	 * The build in the same columns `list` gives an artifact, because
+	 * the identity IS one (ADR-0013): the version is upstream's and
+	 * the release is ours, so they are printed apart here for the
+	 * same reason they are never run together there.
+	 *
+	 * Read from the fields the server split, not by splitting the
+	 * identity here -- that would be a second implementation of a
+	 * grammar there is one of.
+	 */
+	{
+		const struct json_value *b = json_object_get(v, "build");
+
+		if (b != NULL) {
+			fprintf(g_out, "build:     %s %s rel %lld %s%s\n", str_field(b, "artifact"),
+			        str_field(b, "version"), int_field(b, "release"), str_field(b, "arch"),
+			        bool_field(b, "dirty") ? "  (dirty tree)" : "");
+			fprintf(g_out, "built:     %s\n", str_field(b, "time"));
+		}
+	}
 	fprintf(g_out, "root:      %s\n", str_field(v, "root"));
 	fprintf(g_out, "uptime:    %llds\n", int_field(v, "uptime_seconds"));
 	fprintf(g_out, "requests:  %lld\n", int_field(v, "requests"));

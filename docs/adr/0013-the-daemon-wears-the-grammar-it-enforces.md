@@ -2,8 +2,24 @@
 
 ## Status
 
-Accepted. Refines ADR-0007 and ADR-0008 by applying them to the server
-itself rather than only to what it stores.
+Accepted, and amended in v2.18.1. Refines ADR-0007 and ADR-0008 by
+applying them to the server itself rather than only to what it stores.
+
+The amendment is how the identity is *reported*, not what it is. As
+first shipped (v2.18.0) `/api/v1/status` carried flat `build_version`,
+`build_time` and `build_dirty` keys, and the dashboard printed the
+identity as one string. It now carries a `build` object shaped like a
+listing record — `identity`, `artifact`, `version`, `release`, `arch`,
+`time`, `dirty` — and both the status bar and `cix cache status` print
+the fields apart. Running version and release together left no way to
+see where one ended, which is the thing ADR-0007 keeps them apart to
+avoid; having established that the daemon wears the grammar, it should
+be read the way the grammar is read everywhere else.
+
+The split is done server-side by `store_split_display()`, the same
+parser every other name goes through. A client splitting the string
+itself would be a second implementation of this grammar, and the
+hyphen inside `cix-cache` is exactly what a naive split gets wrong.
 
 ## Context
 
@@ -58,9 +74,9 @@ cix-cache-v2.18.0-1-x86_64
 A dirty tree is **not** folded into the name. It is not part of an
 artifact's identity, and bending it in would put `dirty` exactly where
 the architecture goes — the mis-stamping ADR-0008 exists to prevent,
-done to ourselves. It is reported as its own fact: `build_dirty` in
-`/api/v1/status`, a marker on `--version` and in the startup log, and
-the version rendered in the dashboard's warning colour.
+done to ourselves. It is reported as its own fact: `dirty` on the build
+object, a marker on `--version` and in the startup log, and the version
+rendered in the dashboard's warning colour.
 
 `test_store` asserts the generated identity is a name this store would
 accept, splits into all four fields, and carries no abbreviated commit.
@@ -73,7 +89,7 @@ The commit is no longer in the version string. It was the one thing
 `git describe` gave that this does not, and it was reachable only by
 someone with the repository — who can get it from the tag and the
 release number, which is the same information in the project's own
-vocabulary. `build_time` remains, and a dirty build now says so
+vocabulary. The build time remains, and a dirty build now says so
 explicitly rather than by a `-dirty` suffix nobody reads.
 
 This only reads as a version at all because the project tags releases.

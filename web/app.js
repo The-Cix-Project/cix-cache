@@ -622,12 +622,28 @@ function renderStatus() {
 	 * what is serving is not the release it claims to be.
 	 */
 	{
+		const b = s.build || {};
 		const build = el("s-build");
 
-		build.textContent = s.build_version;
-		build.title = "built " + s.build_time +
-			(s.build_dirty ? " from a modified working tree" : "");
-		build.classList.toggle("dirty-build", s.build_dirty === true);
+		/*
+		 * Every field as the SERVER split it. The identity is a
+		 * canonical artifact name, and splitting it here would be a
+		 * second implementation of a grammar there is one of -- the
+		 * hyphen inside "cix-cache" being exactly what a naive split
+		 * gets wrong.
+		 */
+		setText("s-build-artifact", b.artifact || "—");
+		setText("s-build-version", b.version || "—");
+		setText("s-build-release", "rel " + (b.release === undefined ? "—" : b.release));
+		setText("s-build-arch", b.arch || "—");
+		/*
+		 * The whole name on hover: split for reading, but the
+		 * unsplit form is the authoritative one and is what somebody
+		 * would paste into a bug report.
+		 */
+		build.title = b.identity + " — built " + b.time +
+			(b.dirty ? " from a modified working tree" : "");
+		build.classList.toggle("dirty-build", b.dirty === true);
 	}
 
 	/*
