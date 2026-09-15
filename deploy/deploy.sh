@@ -344,6 +344,12 @@ if [ "$SKIP_SYSTEMD" != 1 ]; then
 		Environment=CIXCACHE_UPDATE_ON_CALENDAR=$UPDATE_ON_CALENDAR
 		Environment=CIXCACHE_ACME_EMAIL=$ACME_EMAIL
 		Environment=CIXCACHE_CADDYFILE=$CADDYFILE
+		Environment=CIXCACHE_CADDY_MAIN=$CADDY_MAIN
+		# Carried forward so the timer reproduces the shape this machine
+		# was deployed with. Without it, a deployment fronted by
+		# something other than Caddy would grow one by itself, an hour
+		# later, unattended.
+		Environment=CIXCACHE_SKIP_CADDY=$SKIP_CADDY
 		# Already installed; re-running apt on every tick buys nothing.
 		Environment=CIXCACHE_SKIP_PACKAGES=1
 	EOF
