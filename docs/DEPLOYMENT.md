@@ -328,11 +328,23 @@ on the VM. Pass it as a file or in `CIXCACHE_TOKEN`; it is handed to
 curl through a config file and never on a command line, where `ps`
 would show it to every user on the box for the length of the upload.
 
-Then, without `--dry-run`:
+Then send five, to cross the surface a local test cannot reach — real
+TLS, a real Caddy in front, real fail2ban:
+
+```
+tools/seed.sh --to=https://cache.cix.world \
+  --token-file=/path/to/token --limit=5
+```
+
+Then the rest:
 
 ```
 tools/seed.sh --to=https://cache.cix.world --token-file=/path/to/token
 ```
+
+The proxy sets no request body limit, so the 69 MB ISO goes through it
+intact; if you ever add `request_body max_size` to the site block, that
+upload is the one it will stop.
 
 ### What it selects
 
