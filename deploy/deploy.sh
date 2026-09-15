@@ -348,6 +348,41 @@ if [ "$SKIP_SYSTEMD" != 1 ]; then
 		# about everything else it creates.
 		UMask=0077
 
+		# The server accepts connections and never makes one -- there
+		# is no connect(), no getaddrinfo(), nothing that dials out.
+		# So it is denied the ability entirely, and a compromise that
+		# gets as far as running code still cannot reach a network to
+		# report to or send a store to. Caddy talks to it over
+		# loopback, which is what stays allowed.
+		IPAddressDeny=any
+		IPAddressAllow=localhost
+
+		# It binds one port. Anything else trying to listen is not this
+		# program doing its job.
+		#
+		# Best-effort, and deliberately not counted on: this needs the
+		# kernel's cgroup bind hooks, and measured under LXC it does
+		# not enforce at all -- a bind to another port succeeded with
+		# these set. IPAddressDeny above DOES enforce (verified: an
+		# outbound connection times out, loopback still works), and it
+		# is the one carrying the weight here.
+		SocketBindAllow=tcp:$PORT
+		SocketBindDeny=any
+
+		# Nothing in the store is ever executed -- it is a directory of
+		# opaque bytes other machines will verify for themselves. This
+		# is what stops a published artifact from being run here.
+		NoExecPaths=$STORE
+
+		RestrictRealtime=true
+
+		# Blunt a resource exhaustion attempt rather than let one take
+		# the machine with it. Both are far above what this does: it
+		# streams bodies to disk and serves with sendfile, and forks
+		# exactly one short-lived child per upload to hash it.
+		MemoryMax=1G
+		TasksMax=64
+
 		StandardOutput=journal
 		StandardError=journal
 

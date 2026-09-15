@@ -121,8 +121,6 @@ an expensive answer any anonymous caller can ask for repeatedly.
 
 ### Hardening
 
-`systemd-analyze security` reports **1.3 OK** for the generated unit.
-
 The binary is built by TCC, which emits no stack canary, no PIE, no
 RELRO and no non-executable-stack marking, and **cannot be made to** —
 `-pie` and `-Wl,-z,*` are rejected outright, and
@@ -134,9 +132,25 @@ with the store as the only writable path, `PrivateDevices`,
 `ProtectProc=invisible` and the rest. A memory-safety bug becomes a
 seccomp kill rather than a shell.
 
+The daemon also **cannot reach the network**. It accepts connections
+and never makes one — there is no `connect()` or `getaddrinfo()`
+anywhere in the server — so `IPAddressDeny=any` with
+`IPAddressAllow=localhost` costs it nothing and means a compromise that
+gets as far as running code still has nowhere to send the store or
+report back to. Measured, not assumed: an outbound connection from a
+unit with those settings times out, and loopback still works.
+
+Nothing in the store may be executed (`NoExecPaths`), and `MemoryMax`
+and `TasksMax` bound what a resource-exhaustion attempt can take with
+it. `SocketBindDeny` is set but is best-effort: it needs the kernel's
+cgroup bind hooks and under LXC it does not enforce at all, so it is
+not what any of this rests on.
+
+`systemd-analyze security` reports **1.1 OK**.
+
 Verified live rather than assumed: under the full filter, an upload
 still forks its hashing child, a download still goes out by `sendfile`,
-and gc still walks the store.
+gc still walks the store, and the dashboard still renders.
 
 Caddy matters here too, and not only for TLS. It parses HTTP/1.1, /2
 and /3 and re-serialises a clean request to loopback, so malformed
