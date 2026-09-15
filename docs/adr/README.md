@@ -22,6 +22,7 @@ reasoning incoherent.
 | [0011](0011-brand-typography-and-palette.md) | The dashboard follows the Cix brand system | accepted |
 | [0012](0012-cixpkg-and-signature-policy.md) | CIXPKG is a package format; the listing groups by identity; the signature rule is policy | accepted; refines 0006, 0009 and 0010 |
 | [0013](0013-the-daemon-wears-the-grammar-it-enforces.md) | The daemon's build identity is a canonical artifact name | accepted, amended in v2.18.1; refines 0007 and 0008 |
+| [0014](0014-fuzzing-under-clang.md) | The toolchain mandate governs what ships, not what a developer may run: fuzz harnesses build under clang | accepted in v2.21.0; narrows 0001 |
 
 Nothing is currently undecided. Work in flight is tracked in the issue
 tracker rather than here.

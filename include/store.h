@@ -42,6 +42,15 @@
 #define STORE_SHA256_HEX_LEN 64
 #define STORE_SHA256_MAX 65 /* 64 hex + NUL, matching Cix's PKG_SHA256_MAX */
 #define STORE_NAME_MAX 256
+/*
+ * The most store_canonical_name() can add to a name: the "-1" it
+ * inserts when a name carries no release. Canonical form is produced
+ * into a STORE_NAME_MAX buffer, so a name within this much of the
+ * limit canonicalises to nothing at all rather than to something too
+ * long -- see store_name_is_valid() for why the whitelist does not
+ * reserve it.
+ */
+#define STORE_CANONICAL_GROWTH 2
 
 /*
  * Absolute path, so a server started as PID 1 with an empty PATH still

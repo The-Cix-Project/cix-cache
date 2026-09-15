@@ -282,6 +282,35 @@ int store_name_is_valid(const char *name)
 	if (name == NULL || name[0] == '\0' || name[0] == '.')
 		return 0;
 	len = strlen(name);
+	/*
+	 * The bound is the buffer, and deliberately NOT the buffer less
+	 * the two characters canonicalisation can add.
+	 *
+	 * Reserving that room looks like the tidier rule -- it would make
+	 * "valid" imply "canonicalises", which at 254 and 255 characters
+	 * it does not. It is the wrong trade, and fuzz_name says so in
+	 * about three hundred thousand runs: canonical form is produced
+	 * INTO a STORE_NAME_MAX buffer, so it is at most 255 characters,
+	 * and this rule accepts every one of those. Reserving here
+	 * narrows the input without narrowing the output, so a valid
+	 * 252-character name canonicalises to 254 characters that the
+	 * whitelist then rejects -- store_canonicalize() would rename a
+	 * published entry into a name no request can resolve.
+	 *
+	 * Closure beats totality: what the store cannot survive is
+	 * emitting a name it refuses. A name in the top two lengths is
+	 * merely refused by every operation on it, via entry_path()
+	 * mapping the canonicalisation failure to
+	 * STORE_ERR_INVALID_NAME -- the caller is told "invalid name"
+	 * about a name that is, for this store, exactly that. The
+	 * inconsistency is internal to this file and costs a caller
+	 * nothing.
+	 *
+	 * Coupling this whitelist to release parsing would buy totality
+	 * back. It is not worth it here: this is the function that makes
+	 * traversal structurally impossible, and it should stay short
+	 * enough to audit at a glance.
+	 */
 	if (len >= STORE_NAME_MAX)
 		return 0;
 	for (i = 0; i < len; i++) {
@@ -497,8 +526,37 @@ void store_split_display(const char *name, char *out_name, size_t out_name_size,
 		if (rel != 0) {
 			int v = 0;
 
-			for (i = rel; i < stem; i++)
-				v = v * 10 + (name[i] - '0');
+			/*
+			 * Clamped, because release_offset() bounds the run
+			 * to "all digits" and not to a length: a name may
+			 * carry STORE_NAME_MAX digits there, and
+			 * accumulating those into an int is signed
+			 * overflow -- undefined behaviour, found by
+			 * fuzz_name in about fourteen hundred runs on
+			 * foo1.-202501020250101.
+			 *
+			 * The neighbouring canonicaliser never had this
+			 * bug; it re-renders the release as TEXT and skips
+			 * leading zeros by moving an index, with a comment
+			 * saying strtol would overflow. This loop is the
+			 * one place that turns the digits into a number,
+			 * so it is the one place that has to bound them.
+			 *
+			 * Clamping rather than reporting 1: a release the
+			 * store cannot count is still not the FIRST
+			 * packaging, and saying 1 would claim a different
+			 * artifact identity in the listing. INT_MAX reads
+			 * as the absurdity it is.
+			 */
+			for (i = rel; i < stem; i++) {
+				int d = name[i] - '0';
+
+				if (v > (INT_MAX - d) / 10) {
+					v = INT_MAX;
+					break;
+				}
+				v = v * 10 + d;
+			}
 			*out_release = v;
 		}
 	}

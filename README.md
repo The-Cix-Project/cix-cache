@@ -177,6 +177,33 @@ They can be run individually too — `build/test_store` and the rest —
 but `make test` is the one that fails loudly, and it takes its list
 from the Makefile rather than from a copy of it here.
 
+### Fuzzing
+
+The HTTP parser and the name grammar read attacker-controlled bytes
+before anything has authenticated the request, so both are fuzzed:
+
+```
+make fuzz                   # build the harnesses (needs clang)
+make fuzz-check             # a short run over the committed corpus
+```
+
+This does not change what ships. TCC has no sanitizers, so the
+harnesses in `fuzz/` are built by clang with ASan and UBSan — a
+developer tool that `make all` does not depend on and `make install`
+never touches. Every clang flag in the repository lives in
+`fuzz/Makefile`, in one file, so the boundary is visible rather than
+assumed. The daemon is a TCC build and only a TCC build; see
+`docs/adr/0014-fuzzing-under-clang.md`.
+
+`fuzz_name` asserts properties, not just the absence of crashes — that
+canonicalisation cannot emit a name the store rejects, and that it
+settles. A canonicaliser that renames a published artifact into
+something no request can resolve would never crash.
+
+Anything a harness finds gets a case in the ordinary C test suite as
+well as a corpus seed: `fuzz/corpus/` needs clang to catch a
+regression, and `make test` is what a deployment gates on.
+
 ## Documentation
 
 The dashboard carries its own reference at `/#help` — endpoints, status

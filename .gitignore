@@ -16,6 +16,15 @@ cache/*.iso
 # Build output
 build/
 
+# libFuzzer writes a reproducer here when a harness finds something.
+# It is not a corpus entry: a real finding gets a named seed under
+# fuzz/corpus/ AND a case in the C test suite, because a regression
+# that only clang can catch is one `make test` misses everywhere.
+crash-*
+leak-*
+timeout-*
+oom-*
+
 # System files
 *.swp
 *.swo

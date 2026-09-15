@@ -26,7 +26,7 @@ TESTS := $(BUILD)/test_store $(BUILD)/test_http $(BUILD)/test_serve $(BUILD)/tes
 
 PREFIX := /opt/cixcache
 
-.PHONY: all clean install test
+.PHONY: all clean install test fuzz fuzz-check
 
 all: $(BUILD)/cixcached $(BUILD)/cix-cache $(TESTS)
 
@@ -152,5 +152,21 @@ install: $(BUILD)/cixcached $(BUILD)/cix-cache
 	install -m 0644 web/index.html web/app.js web/style.css web/favicon.svg web/InterVariable.woff2 $(DESTDIR)$(PREFIX)/share/web/
 	@echo "installed to $(DESTDIR)$(PREFIX)"
 
+#
+# Fuzzing. Delegated to fuzz/Makefile, which is where every clang flag
+# in this project lives.
+#
+# `all` deliberately does NOT depend on this and `install` never sees
+# it: the harnesses are a developer tool built by clang because TCC has
+# no sanitizers, and they ship to nobody. The daemon is still a TCC
+# build and only a TCC build (ADR-0001, ADR-0014).
+#
+fuzz:
+	$(MAKE) -C fuzz
+
+fuzz-check:
+	$(MAKE) -C fuzz check
+
 clean:
 	rm -rf $(BUILD)
+	$(MAKE) -C fuzz clean

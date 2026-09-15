@@ -107,6 +107,115 @@ static void test_split_display(void)
 }
 
 /*
+ * A release field is bounded by "all digits", not by a length, so a
+ * valid published name can carry two hundred of them. Turning that run
+ * into an int used to be signed overflow -- undefined behaviour on a
+ * listing any anonymous client can request, reached by publishing one
+ * artifact with a silly name. fuzz_name found it; this keeps it found
+ * without clang, since `make test` is what runs everywhere.
+ *
+ * The assertion is the clamp, not a particular number: what matters is
+ * that a release too large to count is reported as absurdly large and
+ * never as 1, which would claim the FIRST packaging of the version.
+ */
+/*
+ * Canonicalisation is CLOSED over validity: a name this store accepts
+ * must canonicalise to a name it still accepts. store_canonicalize()
+ * renames published entries in place, so a canonical form the
+ * whitelist rejects is an artifact renamed into something no request
+ * can ever resolve again.
+ *
+ * The converse -- "valid" implying "canonicalises" -- deliberately
+ * does NOT hold at the top two lengths, and trying to make it hold by
+ * reserving STORE_CANONICAL_GROWTH in the whitelist is what breaks
+ * closure: it narrows the input without narrowing the output, so a
+ * valid 252-character name canonicalises to 254 characters the
+ * narrowed whitelist refuses. fuzz_name found that in about three
+ * hundred thousand runs. This test pins both halves so the tidier-
+ * looking rule cannot come back.
+ */
+static void test_canonical_closure(void)
+{
+	char name[STORE_NAME_MAX + 8];
+	char out[STORE_NAME_MAX];
+	char again[STORE_NAME_MAX];
+	size_t len;
+
+	for (len = 8; len < STORE_NAME_MAX + 4; len++) {
+		static const char tail[] = ".tar.gz";
+		size_t body = len - (sizeof(tail) - 1);
+		int rc;
+
+		memset(name, 'a', body);
+		memcpy(name + body, tail, sizeof(tail));
+		if (!store_name_is_valid(name))
+			continue;
+
+		rc = store_canonical_name(name, out, sizeof(out));
+		if (rc < 0) {
+			char msg[120];
+
+			/* The only permitted failure is the top two lengths. */
+			snprintf(msg, sizeof(msg),
+			         "a valid %zu-char name only fails to canonicalise near the limit",
+			         len);
+			CHECK(len + STORE_CANONICAL_GROWTH >= STORE_NAME_MAX, msg);
+			continue;
+		}
+		{
+			char msg[120];
+
+			snprintf(msg, sizeof(msg), "canonical form of a %zu-char name is valid", len);
+			CHECK(store_name_is_valid(out), msg);
+			snprintf(msg, sizeof(msg), "canonical form of a %zu-char name is a fixed point",
+			         len);
+			CHECK(store_canonical_name(out, again, sizeof(again)) == 0, msg);
+		}
+	}
+}
+
+static void test_split_display_huge_release(void)
+{
+	static const char *huge[] = {
+		"foo-1.0-202501020250101.tar.gz",
+		"foo1.-202501020250101",
+		"a-1-99999999999999999999999999999999999999.cixpkg",
+		"pkg-2.0-000000000000000000000000000000000003.tar.gz"
+	};
+	char name[256];
+	char version[256];
+	char arch[64];
+	size_t i;
+
+	for (i = 0; i < sizeof(huge) / sizeof(huge[0]); i++) {
+		char msg[200];
+		int release = -1;
+
+		store_split_display(huge[i], name, sizeof(name), version, sizeof(version), &release,
+		                    arch, sizeof(arch));
+		snprintf(msg, sizeof(msg), "%s yields a sane release (got r%d)", huge[i], release);
+		CHECK(release > 0, msg);
+	}
+
+	/*
+	 * The boundary itself: one digit under INT_MAX still counts, and
+	 * the value above it clamps rather than wrapping negative.
+	 */
+	{
+		int release = -1;
+
+		store_split_display("foo-1.0-2147483646.tar.gz", name, sizeof(name), version,
+		                    sizeof(version), &release, arch, sizeof(arch));
+		CHECK(release == 2147483646, "a release just under INT_MAX counts exactly");
+
+		release = -1;
+		store_split_display("foo-1.0-2147483648.tar.gz", name, sizeof(name), version,
+		                    sizeof(version), &release, arch, sizeof(arch));
+		CHECK(release == 2147483647, "a release over INT_MAX clamps to INT_MAX");
+	}
+}
+
+/*
  * Canonical form is <name>-<version>-<release> with an omitted release
  * meaning 1. The cases that matter are the ones where a naive "last
  * component is the release" rule gets it wrong.
@@ -1004,6 +1113,8 @@ int main(void)
 	}
 	test_names();
 	test_split_display();
+	test_canonical_closure();
+	test_split_display_huge_release();
 	test_canonical_name();
 	test_version_cmp();
 	test_publish(root);

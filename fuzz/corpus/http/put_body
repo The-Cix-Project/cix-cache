@@ -1,0 +1,6 @@
+PUT /packages/a-1.0-1-x86_64.cixpkg HTTP/1.1
+Host: x
+Authorization: Bearer tok
+Content-Length: 5
+
+hello

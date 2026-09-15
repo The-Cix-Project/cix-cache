@@ -1,0 +1,4 @@
+GET /api/v1/status HTTP/1.1
+Host: x
+X-Forwarded-For: 10.0.0.1
+
