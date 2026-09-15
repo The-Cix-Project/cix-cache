@@ -298,6 +298,122 @@ cixctl --host=<newbox> image apply-recipe gcc-tcc-bootstrap
 
 Add `--token=<push_token>` to `artifact-config set` if `pull_token` is set.
 
+## Seeding a remote instance from a local one
+
+A fresh public instance starts empty. `tools/seed.sh` fills it from an
+instance you already run, and the same command run again later sends
+whatever has been built since.
+
+**API to API, in both directions.** It reads the source over the public
+`GET` contract and writes the target over the public `PUT` contract. It
+never reads a store directory and never rsyncs into one — a file copied
+in from outside has had no name validation, no canonicalisation, no
+digest check and no signature rule applied to it. Pushing means the
+receiving daemon enforces every invariant it exists to enforce, on
+every byte. An rsync would make the script a second implementation of
+publish.
+
+### First run
+
+Always dry-run first. A seed is most of a gigabyte leaving the box for
+a public server, and the plan is 130-odd lines you can read:
+
+```
+tools/seed.sh --to=https://cache.cix.world \
+  --token-file=/path/to/token --dry-run
+```
+
+The token is the target's `push_token`, from `/opt/cixcache/etc/cixcache.conf`
+on the VM. Pass it as a file or in `CIXCACHE_TOKEN`; it is handed to
+curl through a config file and never on a command line, where `ps`
+would show it to every user on the box for the length of the upload.
+
+Then, without `--dry-run`:
+
+```
+tools/seed.sh --to=https://cache.cix.world --token-file=/path/to/token
+```
+
+### What it selects
+
+Packages are grouped by identity — `(name, architecture)` — and ranked
+by the **source daemon's own** version ordering, the `version_rank` the
+listing already carries. Nothing here re-sorts names: `sort -V`
+disagrees with the daemon on the case the daemon has a comment about,
+putting zlib release 10 below release 2.
+
+`--keep=1`, the default, means the newest release of each package,
+including the newest installer ISO. On the store as it stands that is
+4.4 GB and 856 names reduced to **979 MB and 132 files** — 738
+artifacts collapse to 130 identities, because the bulk of the store is
+superseded builds of the same handful of things (`cix` alone has 325).
+
+Signatures ride along with whatever they sign and are pushed **first**.
+That is not a preference: `begin_upload()` checks
+`store_needs_signature()` before staging any of the body, so an ISO
+whose `.minisig` is not already published is refused outright.
+
+Development debris is left behind by default — `probe-*`, `cix-tests`,
+`cix-aggressive-test` — and the excluded names are printed in every
+run, including dry runs. Override with `--exclude=REGEX`.
+
+### Keeping it updated
+
+Rerunning is the update. The script diffs the two listings and sends
+what is missing, so a run with nothing new costs three requests:
+
+```
+tools/seed.sh --to=https://cache.cix.world --token-file=/path/to/token
+```
+
+`--since=2026-09-01` narrows further, skipping anything older than that
+date. It narrows *after* the newest-N choice and never before, so it
+can never drop a current release and promote a superseded one in its
+place.
+
+### Retaining only the latest
+
+By default nothing on the target is ever deleted. `--prune` makes the
+target converge on the selection — when a new ISO or package arrives,
+the one it supersedes is removed:
+
+```
+tools/seed.sh --to=https://cache.cix.world \
+  --token-file=/path/to/token --prune --dry-run
+```
+
+Three things keep `--prune` from being the dangerous flag it looks
+like:
+
+- It only touches identities the run actually manages. An artifact
+  whose package the source has never heard of is left alone, because a
+  target may be seeded from more than one place and "delete what I
+  cannot account for" is how another seeder's work disappears.
+- It runs **after** the uploads, and not at all if any upload failed.
+  Deleting last month's build before this month's has landed would
+  leave the target with neither.
+- Every deletion appears in `--dry-run` first.
+
+### When it stops
+
+A name that exists on both sides with **different bytes** is refused,
+named, and the run exits non-zero without sending anything. That is
+artifact immutability (ADR-0003) surfacing: a published name may only
+ever mean one byte sequence, and two stores disagreeing about one is a
+question for a person. Delete it on the target if the target's copy is
+the wrong one.
+
+A bad token stops the run before the push loop, on purpose. The public
+instance bans an address after five 401s in ten minutes, and finding
+out inside the loop would ban the seeding machine halfway through.
+
+One cosmetic wrinkle: a signature published before its artifact is not
+visible in the listing on its own — the listing reports signatures as
+`signed: true` on the artifact, not as entries of their own. So a run
+interrupted between the signature phase and the artifact phase will
+re-send those few kilobytes next time. Re-pushing identical bytes is an
+idempotent `201`, so it costs nothing but the bytes.
+
 ## Migrating a static export
 
 A hand-built export (plain tarballs under `packages/`) is
