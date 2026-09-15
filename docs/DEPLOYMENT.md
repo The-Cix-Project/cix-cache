@@ -96,6 +96,84 @@ unrelated reload. It reloads and never restarts, because a restart
 drops connections that mostly belong to somebody else, and it does not
 reload at all when nothing changed.
 
+### What is exposed, and what is not
+
+Open to anyone: artifact `GET`/`HEAD`, `/MANIFEST.json`, `/api/v1/status`
+and `/api/v1/artifacts`. That is what a Cix host needs, and it is all
+information a consumer can already derive from the bytes it fetches.
+
+Behind the push token: `PUT`, `DELETE`, `POST /api/v1/gc`,
+`POST /api/v1/import`, **and the operator surface** —
+`/api/v1/log`, `/api/v1/import-status`, `GET /api/v1/gc`, and the
+`root` field of `status`.
+
+The activity log is the one worth understanding. It names every
+artifact as it is published, with digests and timing, so an open one is
+a live feed of what you are pushing and when — readable by someone who
+never fetches a byte. Hiding the dashboard's log dock does **not** fix
+that; the dock is one reader of an endpoint that answers anybody. The
+dock now disappears when the server refuses, which is the page
+reflecting a decision rather than making one.
+
+The gc dry run is gated for a second reason as well: it walks every
+published name and every blob to build the live set, so an open one is
+an expensive answer any anonymous caller can ask for repeatedly.
+
+### Hardening
+
+`systemd-analyze security` reports **1.3 OK** for the generated unit.
+
+The binary is built by TCC, which emits no stack canary, no PIE, no
+RELRO and no non-executable-stack marking, and **cannot be made to** —
+`-pie` and `-Wl,-z,*` are rejected outright, and
+`-fstack-protector-all` is accepted and produces no canary. So the
+kernel does the containing the compiler cannot: `SystemCallFilter`,
+an empty `CapabilityBoundingSet`, `MemoryDenyWriteExecute` (which is
+also what neutralises the missing NX marking), `ProtectSystem=strict`
+with the store as the only writable path, `PrivateDevices`,
+`ProtectProc=invisible` and the rest. A memory-safety bug becomes a
+seccomp kill rather than a shell.
+
+Verified live rather than assumed: under the full filter, an upload
+still forks its hashing child, a download still goes out by `sendfile`,
+and gc still walks the store.
+
+Caddy matters here too, and not only for TLS. It parses HTTP/1.1, /2
+and /3 and re-serialises a clean request to loopback, so malformed
+request lines, header smuggling and chunked-encoding tricks never reach
+the C parser.
+
+**The store may not live under `/tmp` or `/var/tmp`** — the unit sets
+`PrivateTmp=true` and the service would not find it. The deployer
+refuses rather than leaving you with a `step NAMESPACE` error that
+names neither cause.
+
+### Throttling and blocklisting
+
+fail2ban, configured by the deployer, rather than new code in the C
+server — anything written there would be parsing hostile input in the
+same process that already deserves the scrutiny. Two jails:
+
+| jail | trips on | ban |
+|---|---|---|
+| `cixcache` | 5 × 401/403 in 10m | 1h |
+| `cixcache-flood` | 600 requests in 1m | 15m |
+
+Both read **Caddy's** JSON access log, not cixcached's. cixcached sits
+behind the proxy and only ever sees `127.0.0.1`; its own log has no
+client address in it at all. The flood jail is deliberately loose: a
+Cix host doing a large image build fetches a lot of packages in a
+burst and must not be banned for it.
+
+fail2ban adds rules for offending addresses only. It sets no default
+policy and cannot lock you out of SSH, which a hand-written firewall
+rule on a remote machine very much can.
+
+```
+sudo fail2ban-client status cixcache
+sudo fail2ban-client set cixcache unbanip <ip>
+```
+
 ### Updating
 
 ```

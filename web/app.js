@@ -118,8 +118,34 @@ function logLine(text, kind) {
  * entries after the last sequence number it saw, so a poll costs one
  * small response instead of the whole ring.
  */
+/*
+ * Returns null on 401 instead of throwing, for the endpoints that are
+ * operator-only. The poll loop treats any throw as "the server is
+ * unreachable", so without this a perfectly healthy public instance
+ * would paint itself as down to every anonymous visitor.
+ */
+async function apiRequestOptional(method, path) {
+	try {
+		return await apiRequest(method, path, { auth: true });
+	} catch (e) {
+		if (String(e.message).indexOf("401") >= 0 || /token/i.test(e.message))
+			return null;
+		throw e;
+	}
+}
+
 async function refreshLog() {
-	const data = await apiRequest("GET", "/api/v1/log?after=" + logSeq);
+	const data = await apiRequestOptional("GET", "/api/v1/log?after=" + logSeq);
+
+	/*
+	 * No credential, no activity feed -- and the dock goes away rather
+	 * than sitting there empty. The server decides this, not the page:
+	 * the endpoint answers 401 to anyone without the token, so hiding
+	 * the dock is reflecting a refusal, never enforcing one.
+	 */
+	el("logdock").hidden = data === null;
+	if (data === null)
+		return;
 	const entries = data.entries || [];
 
 	for (const e of entries) {
@@ -684,9 +710,9 @@ async function poll() {
 		cache.artifacts = data.artifacts || [];
 		renderResults();
 
-		const imp = await apiRequest("GET", "/api/v1/import-status");
+		const imp = await apiRequestOptional("GET", "/api/v1/import-status");
 
-		cache.importing = !!imp.running;
+		cache.importing = !!(imp && imp.running);
 		renderImport();
 
 		await refreshLog();
@@ -700,7 +726,12 @@ async function poll() {
 
 async function runGc(dryRun) {
 	try {
-		await apiRequest(dryRun ? "GET" : "POST", "/api/v1/gc", { auth: !dryRun });
+		/*
+		 * The dry run needs the token too now. It walks every name and
+		 * every blob to build the live set, so it is both operator
+		 * information and an expensive thing to let anyone ask for.
+		 */
+		await apiRequest(dryRun ? "GET" : "POST", "/api/v1/gc", { auth: true });
 		await poll();
 	} catch (e) {
 		logLine("gc failed: " + e.message, "err");

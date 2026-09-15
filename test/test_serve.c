@@ -155,22 +155,28 @@ int main(void)
 		CHECK(atoi(misses) > 0, "artifact misses are counted separately");
 	}
 
-	/* The activity ring, and that ?after= only returns what is newer. */
+	/*
+	 * The activity ring, and that ?after= only returns what is newer.
+	 * Read WITH the token since #19: the ring is operator data, and
+	 * the gate is asserted separately below.
+	 */
 	{
 		char c[600];
 		char n1[64];
 		char n2[64];
 
 		snprintf(c, sizeof(c),
-		         "curl -s 'http://127.0.0.1:%d/api/v1/log?after=0' | grep -o '\"seq\"' | wc -l",
-		         PORT);
+		         "curl -s -H 'Authorization: Bearer %s' "
+		         "'http://127.0.0.1:%d/api/v1/log?after=0' | grep -o '\"seq\"' | wc -l",
+		         TOKEN, PORT);
 		ts_capture(c, n1, sizeof(n1));
 		CHECK(atoi(n1) > 1, "the server log records what it has been doing");
 
 		snprintf(c, sizeof(c),
-		         "curl -s 'http://127.0.0.1:%d/api/v1/log?after=999999' | grep -o '\"text\"' "
+		         "curl -s -H 'Authorization: Bearer %s' "
+		         "'http://127.0.0.1:%d/api/v1/log?after=999999' | grep -o '\"text\"' "
 		         "| wc -l",
-		         PORT);
+		         TOKEN, PORT);
 		ts_capture(c, n2, sizeof(n2));
 		CHECK(atoi(n2) == 0, "?after= past the end returns nothing to re-show");
 	}
@@ -346,6 +352,53 @@ int main(void)
 		         PORT);
 		CHECK(ts_capture(c, got, sizeof(got)) == 0 && atoi(got) == 1,
 		      "and the unsigned one beside it omits the field rather than saying false");
+	}
+
+	/*
+	 * The operator surface is gated (#19).
+	 *
+	 * These endpoints describe what the server is DOING and where it
+	 * keeps things, as opposed to serving bytes a consumer asked for.
+	 * On a public instance an open /log is a live feed of what is
+	 * being published, with names and digests, to anyone who never
+	 * fetches a byte. Asserted from both sides so a future refactor
+	 * cannot quietly reopen one.
+	 */
+	{
+		char c[600];
+		char got[64];
+
+		CHECK(ts_status(PORT, "GET", "/api/v1/log?after=0", NULL) == 401,
+		      "the activity log refuses an anonymous reader");
+		CHECK(ts_status(PORT, "GET", "/api/v1/gc", NULL) == 401,
+		      "and so does the gc dry run, which walks the whole store to answer");
+		CHECK(ts_status(PORT, "GET", "/api/v1/import-status", NULL) == 401,
+		      "and import status");
+
+		/* With the token they answer, so the gate is a gate and not a wall. */
+		CHECK(ts_status(PORT, "GET", "/api/v1/log?after=0", TOKEN) == 200,
+		      "the operator still gets the log");
+		CHECK(ts_status(PORT, "GET", "/api/v1/gc", TOKEN) == 200, "and the dry run");
+
+		/*
+		 * What a consumer needs stays open, or a Cix host with no
+		 * credential could not use this server at all.
+		 */
+		CHECK(ts_status(PORT, "GET", "/api/v1/status", NULL) == 200, "status stays public");
+		CHECK(ts_status(PORT, "GET", "/api/v1/artifacts", NULL) == 200,
+		      "and so does the listing, which is what MANIFEST.json already says");
+
+		/* The store's path is not a consumer's business. */
+		snprintf(c, sizeof(c),
+		         "curl -s 'http://127.0.0.1:%d/api/v1/status' | grep -c '\"root\"' || true", PORT);
+		ts_capture(c, got, sizeof(got));
+		CHECK(atoi(got) == 0, "an anonymous status does not disclose the store path");
+		snprintf(c, sizeof(c),
+		         "curl -s -H 'Authorization: Bearer %s' 'http://127.0.0.1:%d/api/v1/status' "
+		         "| grep -c '\"root\"' || true",
+		         TOKEN, PORT);
+		ts_capture(c, got, sizeof(got));
+		CHECK(atoi(got) == 1, "but an operator's does");
 	}
 
 	ts_stop(&ts);

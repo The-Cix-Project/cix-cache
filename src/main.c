@@ -387,6 +387,22 @@ static void respond_json(struct conn *cc, int status, struct json_writer *w)
 
 /* ---- auth ---- */
 
+/*
+ * Whether a request carries the operator credential.
+ *
+ * The push token and not a third one: everything it guards is the same
+ * class of thing -- what this server is doing and where it keeps it --
+ * and whoever may publish already knows the store intimately. A second
+ * token would be a second thing to rotate and a second thing to leave
+ * unset.
+ *
+ * Note this inherits bearer_ok()'s rule that an unset token is an open
+ * door. That is deliberate and consistent with pull_token, and it is
+ * why deploy.sh always generates one: a public instance with no push
+ * token has no operator surface either.
+ */
+static int operator_ok(const struct http_request *req);
+
 static int bearer_ok(const struct http_request *req, const char *expect)
 {
 	char hdr[CONF_TOKEN_MAX + 32];
@@ -398,6 +414,11 @@ static int bearer_ok(const struct http_request *req, const char *expect)
 		return 0;
 	got = strncmp(hdr, "Bearer ", 7) == 0 ? hdr + 7 : hdr;
 	return strcmp(got, expect) == 0;
+}
+
+static int operator_ok(const struct http_request *req)
+{
+	return bearer_ok(req, g_conf.push_token);
 }
 
 /* ---- artifact serving ---- */
@@ -1197,7 +1218,7 @@ static void api_log(struct conn *cc, const char *raw_path)
 	jw_free(&w);
 }
 
-static void api_status(struct conn *cc)
+static void api_status(struct conn *cc, const struct http_request *req)
 {
 	struct list_ctx pkgs;
 	struct json_writer w;
@@ -1259,8 +1280,17 @@ static void api_status(struct conn *cc)
 		jw_bool(&w, CIXCACHE_BUILD_DIRTY);
 		jw_obj_close(&w);
 	}
-	jw_key(&w, "root");
-	jw_str(&w, store_root());
+	/*
+	 * Where the store lives is operator information, and on a public
+	 * instance it is a free hint about the filesystem to anyone
+	 * deciding where to aim. Omitted rather than blanked: a consumer
+	 * has no use for it, and "" would read as a server that does not
+	 * know its own root.
+	 */
+	if (operator_ok(req)) {
+		jw_key(&w, "root");
+		jw_str(&w, store_root());
+	}
 	jw_key(&w, "uptime_seconds");
 	jw_int(&w, (now_ms() - g_started_ms) / 1000);
 	jw_key(&w, "requests");
@@ -1727,18 +1757,37 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 		const char *ep = path + 8;
 
 		if (is_get && strcmp(ep, "status") == 0) {
-			api_status(cc);
+			api_status(cc, req);
 			return;
 		}
 		if (is_get && strcmp(ep, "artifacts") == 0) {
 			api_artifacts(cc);
 			return;
 		}
+		/*
+		 * The activity ring is operator data, not consumer data. It
+		 * names every artifact as it is published, with digests and
+		 * timing, so on a public instance an open /log is a live feed
+		 * of what is being pushed and when -- readable by anyone,
+		 * whether or not they ever fetch a byte.
+		 *
+		 * Hiding the dashboard's log dock does NOT do this. The dock
+		 * is one reader of an endpoint that answers anybody; the
+		 * endpoint is where the decision has to live.
+		 */
 		if (is_get && strcmp(ep, "log") == 0) {
+			if (!operator_ok(req)) {
+				respond_error(cc, 401, "the activity log requires a bearer token");
+				return;
+			}
 			api_log(cc, req->path);
 			return;
 		}
 		if (is_get && strcmp(ep, "import-status") == 0) {
+			if (!operator_ok(req)) {
+				respond_error(cc, 401, "import status requires a bearer token");
+				return;
+			}
 			api_import_status(cc);
 			return;
 		}
@@ -1750,7 +1799,20 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 			api_gc(cc, 0);
 			return;
 		}
+		/*
+		 * The dry run is gated for the same reason the real one is,
+		 * and for one more: it walks every published name and every
+		 * blob to build the live set, so an open one is an expensive
+		 * operation any anonymous caller can ask for as often as it
+		 * likes. The POST has always needed a token; the GET reporting
+		 * what it WOULD remove was left open, which told an anonymous
+		 * caller what is in the store and cost a full walk to answer.
+		 */
 		if (is_get && strcmp(ep, "gc") == 0) {
+			if (!operator_ok(req)) {
+				respond_error(cc, 401, "gc requires a bearer token");
+				return;
+			}
 			api_gc(cc, 1);
 			return;
 		}

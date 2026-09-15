@@ -65,7 +65,14 @@ int main(void)
 	CHECK(ts_status(PORT, "DELETE", "/g-1.0.tar.gz", TOKEN) == 204, "unpublish");
 	CHECK(count_blobs(&ts) == 1, "unpublishing leaves the blob behind");
 
-	CHECK(ts_status(PORT, "GET", "/api/v1/gc", NULL) == 200, "gc dry-run is a GET");
+	/*
+	 * The dry run is a GET, and needs the token since #19 -- it walks
+	 * every published name and every blob to build the live set, so it
+	 * is both operator information and an expensive answer to give an
+	 * anonymous caller on demand.
+	 */
+	CHECK(ts_status(PORT, "GET", "/api/v1/gc", TOKEN) == 200, "gc dry-run is a GET");
+	CHECK(ts_status(PORT, "GET", "/api/v1/gc", NULL) == 401, "and it needs a token too");
 	CHECK(count_blobs(&ts) == 1, "dry-run removes nothing");
 
 	CHECK(ts_status(PORT, "POST", "/api/v1/gc", NULL) == 401, "gc needs a token");

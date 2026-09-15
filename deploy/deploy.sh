@@ -61,6 +61,7 @@ SKIP_PACKAGES=${CIXCACHE_SKIP_PACKAGES:-0}
 # The site file this script owns, and the distribution's main Caddyfile
 # that has to import it. Both variables because a distribution that
 # puts them elsewhere should not need this script edited.
+ACCESS_LOG=${CIXCACHE_ACCESS_LOG:-/var/log/caddy/$DOMAIN.access.log}
 CADDY_MAIN=${CIXCACHE_CADDY_MAIN:-/etc/caddy/Caddyfile}
 CADDYFILE=${CIXCACHE_CADDYFILE:-/etc/caddy/Caddyfile.d/$DOMAIN.caddy}
 UNIT_DIR=${CIXCACHE_UNIT_DIR:-/etc/systemd/system}
@@ -100,6 +101,17 @@ case $DOMAIN in
 	''|*[!A-Za-z0-9.-]*) die "CIXCACHE_DOMAIN '$DOMAIN' is not a hostname" ;;
 esac
 
+# The unit sets PrivateTmp=true, which gives the service its own /tmp
+# AND its own /var/tmp. A store under either is simply not there inside
+# that namespace, and systemd fails the mount setup with
+# "Failed at step NAMESPACE ... No such file or directory" -- which
+# names neither PrivateTmp nor the store and sends you looking in the
+# wrong place. Caught here instead, where the reason can be said.
+case $STORE in
+	/tmp/*|/var/tmp/*|/tmp|/var/tmp)
+		die "CIXCACHE_STORE cannot be under /tmp or /var/tmp: the service runs with PrivateTmp=true and would not find it" ;;
+esac
+
 # A single flock around the whole run. The timer fires on a schedule and
 # a build can outlast the interval; two of these racing would have one
 # installing over the other's tree.
@@ -117,7 +129,7 @@ info "store  $STORE"
 if [ "$SKIP_PACKAGES" != 1 ]; then
 	say "Packages"
 	missing=()
-	for pkg in git make tcc curl ca-certificates; do
+	for pkg in git make tcc curl ca-certificates fail2ban; do
 		dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
 	done
 	if [ ${#missing[@]} -gt 0 ]; then
@@ -312,6 +324,30 @@ if [ "$SKIP_SYSTEMD" != 1 ]; then
 		MemoryDenyWriteExecute=true
 		SystemCallArchitectures=native
 
+		# The binary is built by TCC, which emits no stack canary, no
+		# PIE, no RELRO and no non-executable-stack marking, and cannot
+		# be made to -- every relevant flag is either rejected or
+		# silently ignored. So the kernel does the containing that the
+		# compiler cannot, and this is the tier that matters most: a
+		# memory-safety bug in a C HTTP parser turns into a seccomp
+		# kill rather than a shell.
+		SystemCallFilter=@system-service
+		SystemCallFilter=~@privileged @resources @obsolete
+		SystemCallErrorNumber=EPERM
+		CapabilityBoundingSet=
+		AmbientCapabilities=
+		RestrictSUIDSGID=true
+		PrivateDevices=true
+		ProtectProc=invisible
+		ProcSubset=pid
+		ProtectHostname=true
+		ProtectClock=true
+		ProtectKernelLogs=true
+		RemoveIPC=true
+		# Blobs are published mode 0444 by the store itself; this is
+		# about everything else it creates.
+		UMask=0077
+
 		StandardOutput=journal
 		StandardError=journal
 
@@ -350,8 +386,10 @@ if [ "$SKIP_SYSTEMD" != 1 ]; then
 		# something other than Caddy would grow one by itself, an hour
 		# later, unattended.
 		Environment=CIXCACHE_SKIP_CADDY=$SKIP_CADDY
-		# Already installed; re-running apt on every tick buys nothing.
-		Environment=CIXCACHE_SKIP_PACKAGES=1
+		# Deliberately NOT skipping the package step. The check is six
+		# dpkg queries and ~80ms when nothing is missing, and skipping
+		# it meant a release that needs a new dependency could never
+		# install one on a machine that only ever updates by timer.
 	EOF
 
 	install_if_changed "$UNIT_DIR/$SERVICE-update.timer" 0644 <<-EOF || true
@@ -458,6 +496,15 @@ if [ "$SKIP_CADDY" != 1 ]; then
 		# make it marginally bigger. The dashboard is small enough not
 		# to care.
 		$DOMAIN {$acme_line
+		    # cixcached sits behind this proxy and only ever sees
+		    # 127.0.0.1, so its own log has no client address in it.
+		    # This is the only place the real one exists, and it is
+		    # what fail2ban bans on.
+		    log {
+		        output file $ACCESS_LOG
+		        format json
+		    }
+
 		    reverse_proxy $BIND:$PORT
 
 		    # Belt to the redirect's braces: the redirect fixes a wrong
@@ -494,6 +541,75 @@ if [ "$SKIP_CADDY" != 1 ]; then
 	# Only if it is not already running something. Never restarted.
 	systemctl is-active --quiet caddy || systemctl start caddy
 	systemctl is-enabled --quiet caddy || systemctl enable --quiet caddy
+fi
+
+# ------------------------------------------------------------ fail2ban
+
+# Throttling and blocklisting, done by a tool built for it rather than
+# by new code in the C server. Anything written here would be parsing
+# hostile input in the same process that already worries us; fail2ban
+# has had orders of magnitude more eyes than an afternoon's work would.
+#
+# It bans by adding rules for offending addresses only. It does not set
+# a default policy and cannot lock anyone out of SSH, which a
+# hand-written firewall rule on a remote machine very much can.
+if [ "$SKIP_CADDY" != 1 ] && command -v fail2ban-server >/dev/null; then
+	say "fail2ban"
+	install -d -m 0755 "$(dirname "$ACCESS_LOG")"
+
+	install_if_changed /etc/fail2ban/filter.d/cixcache.conf 0644 <<-'EOF' || true
+		# Caddy's JSON access log. client_ip rather than remote_ip: with
+		# a proxy in front it is the address that actually asked, and
+		# with none they are the same.
+		[Definition]
+		failregex = ^.*"client_ip":"<HOST>".*"status":(?:401|403)
+		ignoreregex =
+		journalmatch =
+	EOF
+
+	install_if_changed /etc/fail2ban/filter.d/cixcache-flood.conf 0644 <<-'EOF' || true
+		# Every request, whatever it answered. The jail's maxretry is
+		# what makes this a rate limit rather than a ban-on-sight.
+		[Definition]
+		failregex = ^.*"client_ip":"<HOST>".*"status":[0-9]+
+		ignoreregex =
+		journalmatch =
+	EOF
+
+	install_if_changed /etc/fail2ban/jail.d/cixcache.local 0644 <<-EOF || true
+		# Credential probing: a handful of rejected tokens is somebody
+		# guessing, because a publisher that has the token does not
+		# produce a 401 at all.
+		[cixcache]
+		enabled  = true
+		filter   = cixcache
+		logpath  = $ACCESS_LOG
+		backend  = auto
+		port     = http,https
+		maxretry = 5
+		findtime = 10m
+		bantime  = 1h
+
+		# The throttle. Deliberately loose: a Cix host doing a large
+		# image build fetches a lot of packages in a burst and must not
+		# be banned for it, so this is set where only a scraper or a
+		# flood lands.
+		[cixcache-flood]
+		enabled  = true
+		filter   = cixcache-flood
+		logpath  = $ACCESS_LOG
+		backend  = auto
+		port     = http,https
+		maxretry = 600
+		findtime = 1m
+		bantime  = 15m
+	EOF
+
+	systemctl enable --quiet --now fail2ban 2>/dev/null || true
+	if [ "$changed" = 1 ]; then
+		systemctl reload fail2ban 2>/dev/null || systemctl restart fail2ban || true
+	fi
+	info "jails: cixcache (401 probing), cixcache-flood (rate)"
 fi
 
 # --------------------------------------------------------------- verify
