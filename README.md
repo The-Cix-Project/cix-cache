@@ -212,7 +212,8 @@ codes, CLI commands and how the store works.
 - `docs/DESIGN.md` — the original design brief and its reasoning
 - `docs/DEPLOYMENT.md` — running it, and pointing hosts at it. A public
   instance behind Caddy is one re-runnable script: `deploy/deploy.sh`,
-  and `tools/seed.sh` fills it from an instance you already run
+  and `tools/seed.sh` fills it from an instance you already run.
+  `tools/latest-iso.sh` renders a download block for a website
 - `docs/adr/` — one decision per file, with an index in
   `docs/adr/README.md`. Their figures are dated observations rather than
   current facts: an ADR records the evidence a decision was made on, so

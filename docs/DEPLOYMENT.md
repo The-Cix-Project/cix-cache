@@ -426,6 +426,72 @@ interrupted between the signature phase and the artifact phase will
 re-send those few kilobytes next time. Re-pushing identical bytes is an
 idempotent `201`, so it costs nothing but the bytes.
 
+## Putting the latest ISO on a website
+
+`tools/latest-iso.sh` runs on the **website's** machine, on a timer, and
+writes a fragment the site includes. Nothing runs in the visitor's
+browser, so there is no CORS to arrange and no second copy of anything
+on the page.
+
+```
+tools/latest-iso.sh --base=https://cache.cix.world \
+  --output=/var/www/cix.world/downloads.html
+```
+
+A cron line, twice an hour:
+
+```
+*/30 * * * * /opt/cix/tools/latest-iso.sh --base=https://cache.cix.world --output=/var/www/cix.world/downloads.html
+```
+
+Then include the fragment — an SSI `<!--#include file="downloads.html" -->`,
+a template partial, or a `<div>` the page loads. `--format=json` emits
+the same facts as an object per architecture if your site is templated
+and would rather have the data than the markup. `--pubkey=KEY` adds the
+`minisign -Vm` command to the block; the public key is a fact about the
+project rather than about the cache, so it is an argument, not a fetch.
+
+### It does not parse names
+
+The listing already carries `artifact`, `version`, `release` and `arch`
+as separate fields, split server-side by `store_split_display()`.
+ADR-0013 put that split on the server for this exact reason: a client
+splitting the string itself would be a second implementation of the
+grammar, and the hyphen inside `cix-installer` is what a naive split
+gets wrong. The script reads fields; it never cuts a string.
+
+Choosing the newest is the same story. It uses `version_rank`, the
+ordering the daemon computed with `store_rank_versions()`. Sorting on
+the website would disagree with the store — `sort -V` puts release 10
+below release 2.
+
+### Why this may read `/api/v1` when host code may not
+
+ADR-0002 is blunt: `/api/v1/*` is operator-facing observability, and no
+Cix host code path may consult it. That invariant protects the
+recipe → artifact chain — a daemon resolving `name@version` for install
+must learn the exact name from a recipe in git, never by asking this
+server what exists.
+
+An installer ISO is not on that path, and ADR-0010 section 7 says so
+directly: `packages` is consumed by a daemon resolving `name@version`;
+an ISO is never installed that way. It is chosen by a person and
+written to a USB stick. This script reads the listing the way the
+dashboard reads it — for a human — which is the audience the listing
+is for.
+
+### Failure keeps yesterday's page
+
+Output is written beside the target and moved over it only once
+everything has succeeded, so a reader sees the old file or the new one
+and never half of either. If the cache is unreachable, serves no
+installer, or serves an **unsigned** one, the script exits non-zero
+having touched nothing and the site keeps showing the last good block.
+
+The unsigned case is a refusal and not a warning. ADR-0010 is the
+reason installers are signed at all; advertising an install image
+nobody can verify is the failure that tier exists to prevent.
+
 ## Migrating a static export
 
 A hand-built export (plain tarballs under `packages/`) is
