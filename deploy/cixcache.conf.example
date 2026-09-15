@@ -4,7 +4,8 @@
 # keep it mode 0640 -- it holds a credential.
 
 # Where the store lives. Anything on one filesystem with the store is
-# fine; blobs/, packages/, images/ and tmp/ are created on first start.
+# fine; blobs/, packages/ and tmp/ are created on first start. (There
+# is no images/ -- that tier was removed in ADR-0006.)
 root=/var/lib/cixcache
 
 bind=0.0.0.0
@@ -21,3 +22,18 @@ web_root=/opt/cixcache/share/web
 #
 pull_token=
 push_token=CHANGE-ME
+
+# Suffixes that may not be published unsigned, comma separated, matched
+# with or without the leading dot. Empty means nothing is refused.
+#
+# The default is the historical behaviour and the one case that stands
+# on its own: an ISO is booted, so nothing downstream gets a chance to
+# check it. Adding .cixpkg or .tar.gz makes the store refuse unsigned
+# packages too -- which will 409 a push from any Cix host whose signing
+# key is not configured, and is why it is not the default. This is
+# hygiene rather than security: the store is not a trust boundary
+# (ADR-0002, ADR-0012).
+require_signature=.iso
+
+# A key this file does not mention keeps its built-in default. An empty
+# value, though, is a value -- "require_signature=" enforces nothing.

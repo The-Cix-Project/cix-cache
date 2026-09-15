@@ -26,6 +26,112 @@ systemctl status cixcache
 journalctl -u cixcache -f          # MISS lines land here
 ```
 
+## Deploying a public instance behind Caddy
+
+`deploy/deploy.sh` brings a machine to the state described by the latest
+release tag, and does nothing when it is already there. It is the
+install and the update — which is why the systemd timer it sets up
+simply runs the same file again. A separate updater would be a second
+copy of the same logic, and the two would drift.
+
+```
+sudo CIXCACHE_DOMAIN=cache.cix.world ./deploy/deploy.sh
+```
+
+**Before the first run**, point an `A` record for the domain at the
+machine and open `:80` and `:443` to the internet. Caddy proves control
+of the name over HTTP to get a certificate, so without that the deploy
+still succeeds and the site simply has no TLS until it can. The script
+says so rather than failing.
+
+Everything is a variable:
+
+| | default | |
+|---|---|---|
+| `CIXCACHE_DOMAIN` | `cache.cix.world` | the public name |
+| `CIXCACHE_REPO` | the GitHub mirror | where source comes from |
+| `CIXCACHE_REF` | latest `v*` tag | pin to deploy one release |
+| `CIXCACHE_PREFIX` | `/opt/cixcache` | binaries, web assets, config |
+| `CIXCACHE_STORE` | `/var/lib/cixcache` | the store |
+| `CIXCACHE_USER` | `cixcache` | the service account it creates |
+| `CIXCACHE_BIND` | `127.0.0.1` | see below |
+| `CIXCACHE_PORT` | `8080` | |
+| `CIXCACHE_UPDATE_ON_CALENDAR` | `hourly` | systemd `OnCalendar=` |
+| `CIXCACHE_ACME_EMAIL` | unset | Let's Encrypt renewal warnings |
+
+`cixcached` binds **loopback only**. Caddy is the one thing reachable
+from outside, so there is no second door to remember to close; moving
+`CIXCACHE_BIND` off `127.0.0.1` publishes an unencrypted copy.
+
+### What a run does
+
+Installs `tcc`, `git`, `make` and Caddy if absent; creates the service
+user and the store; fetches the repository and checks out the latest
+`v*` tag; builds it; **runs its tests and installs only if they pass**,
+so a tag that fails leaves the running server exactly where it was;
+writes a config if there is none, generating a push token; renders the
+systemd units and the Caddy site; and restarts only what actually
+changed.
+
+It is safe to re-run, and quick when there is nothing to do — it asks
+the installed binary which release it is (the version is a canonical
+artifact name carrying its tag, ADR-0013) rather than keeping a state
+file that could disagree with the disk.
+
+The config is written once and never rewritten. Regenerating it would
+silently invalidate every publisher's token.
+
+### Sharing a Caddy with other sites
+
+The usual case, and the script assumes it. It adds one file under
+`/etc/caddy/Caddyfile.d/` and one `import` line, never an edit to
+another site's block, so removing this site is deleting one file.
+
+Before touching anything it snapshots the main Caddyfile. It refuses to
+start if another block already claims the domain, validates the
+**combined** config — every other site included — before anything is
+asked to load it, and puts the originals back if that fails. So a bad
+render is a failed deploy rather than a Caddyfile that breaks the next
+unrelated reload. It reloads and never restarts, because a restart
+drops connections that mostly belong to somebody else, and it does not
+reload at all when nothing changed.
+
+### Updating
+
+```
+systemctl list-timers cixcache-update.timer
+journalctl -u cixcache-update -f
+```
+
+The timer re-runs the deployer hourly with a randomised delay, so every
+machine on this schedule does not ask GitHub at the same second. It
+picks up a new **release tag** — tagging is what deploys. Nothing on
+`main` reaches a public endpoint by itself.
+
+The deployer installs a copy of itself at
+`$CIXCACHE_PREFIX/bin/cix-cache-deploy` and the timer runs that, not the
+copy in the checkout. Pointing systemd into the checkout looks tidier
+and is a trap: the checkout sits at a release tag, so any tag predating
+the script leaves the unit with an `ExecStart` that does not resolve and
+a timer that fails silently forever.
+
+### Afterwards
+
+The instance starts **empty**. It has no upstream and cannot pull
+through — it is a cache, not a catalogue (ADR-0002) — so it holds
+nothing until something publishes to it:
+
+```
+sudo grep push_token /opt/cixcache/etc/cixcache.conf
+cix cache --host=cache.cix.world --port=443 publish FILE \
+  --name=NAME --sha256=HEX --token=<push_token>
+```
+
+Pull is open and push is not. A consumer verifies every byte against a
+checksum that came from git over a different protocol, so an open pull
+surface gives an attacker nothing a host would accept; an open push lets
+anyone fill the disk.
+
 ## Running the server
 
 ```

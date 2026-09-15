@@ -183,7 +183,8 @@ The dashboard carries its own reference at `/#help` — endpoints, status
 codes, CLI commands and how the store works.
 
 - `docs/DESIGN.md` — the original design brief and its reasoning
-- `docs/DEPLOYMENT.md` — running it, and pointing hosts at it
+- `docs/DEPLOYMENT.md` — running it, and pointing hosts at it. A public
+  instance behind Caddy is one re-runnable script: `deploy/deploy.sh`
 - `docs/adr/` — one decision per file, with an index in
   `docs/adr/README.md`. Their figures are dated observations rather than
   current facts: an ADR records the evidence a decision was made on, so
