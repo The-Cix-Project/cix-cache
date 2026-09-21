@@ -198,6 +198,26 @@ int main(void)
 	}
 
 	/*
+	 * #21. Deleting the ISO takes its signature with it, and the
+	 * reason is the next assertion rather than tidiness: while the
+	 * orphan survived, it still satisfied the gate above, so a push of
+	 * DIFFERENT bytes under the same name was accepted -- 201, leaving
+	 * the store serving a bootable that its own published signature
+	 * fails to verify. The refusal here is the gate working on a store
+	 * that no longer contains a signature for bytes it no longer has.
+	 */
+	CHECK(ts_status(PORT, "DELETE", "/inst-1.0-1-x86_64.iso", TOKEN) == 204,
+	      "the signed ISO is deleted");
+	CHECK(ts_status(PORT, "GET", "/inst-1.0-1-x86_64.iso", NULL) == 404,
+	      "the ISO is gone");
+	CHECK(ts_status(PORT, "GET", "/inst-1.0-1-x86_64.iso.minisig", NULL) == 404,
+	      "and its signature went with it, rather than being left served");
+	CHECK(put(&ts, b_path, "inst-1.0-1-x86_64.iso", b_digest, TOKEN) == 409,
+	      "so re-publishing different bytes under that name is refused again");
+	CHECK(ts_status(PORT, "GET", "/inst-1.0-1-x86_64.iso", NULL) == 404,
+	      "and nothing was stored by the refused push");
+
+	/*
 	 * Packages are signed additively (cix ADR-0279, #12): a signature
 	 * may be published beside one, but a package is never refused for
 	 * lacking one. That second half is the production-breaking case --

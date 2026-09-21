@@ -5,6 +5,12 @@
 Accepted. Closes itdlabs/cix-cache#8. Refines ADR-0006 rather than
 reversing it, and narrows ADR-0002 for exactly one class of artifact.
 
+Section 4's "deletes are not coupled" is amended by #21: a delete now
+removes an artifact's detached signature with it. Deleting a signature
+on its own is still allowed, which was the half of that decision the
+measurement did not touch. Section 5 is unchanged, but its last
+paragraph no longer rests on section 4.
+
 ## Context
 
 ADR-0006 removed whole-image artifacts. The argument was that an image
@@ -137,6 +143,34 @@ orphaned signature is inert, and a missing one is exactly the *missing*
 path above. If the tidiness matters, `gc` reporting orphaned signatures
 costs no invariant.
 
+**Amended by #21 (2026-09-21): the orphan is not inert.** Measured
+against a throwaway instance: delete a signed ISO, and its signature is
+still published; push *different* bytes under that same name, and the
+store answers `201`. Section 5's gate looks a signature up by the name
+it derives from the artifact, so the leftover satisfies it, and the
+store ends up serving a bootable whose own published signature fails
+`minisign -Vm` against it. The gate that exists to refuse unsigned
+bootables was defeated by its own leftovers.
+
+"An orphaned signature is inert" was the load-bearing claim here, and
+it was false. So the two now leave together, in `store_unpublish()`.
+
+The objection above still deserves an answer, because it was the right
+question: does this put the first relationship *between* entries into a
+store whose strength is that entries have none? It does not, because
+that relationship already existed — section 5's gate derives one name
+from the other and looks it up, which is the same rule read in the
+other direction. Nothing is stored that holds a pair together; there is
+still no index, and a signature is still just another blob with a name.
+What changed is that a rule the accept path already applied is now
+applied by the delete path too, so the two cannot disagree.
+
+Note what is NOT coupled, deliberately: deleting a signature by its own
+name removes only the signature, and an artifact may still be left
+unsigned. Only the dangerous direction is closed. The `gc` reporting
+suggested above is no longer needed for the case that motivated it,
+though it would still find orphans left by an older daemon.
+
 ### 5. An unsigned bootable is refused, at header time
 
 The cache is not vouching for anything by refusing; it is declining to
@@ -149,8 +183,10 @@ either is uploaded, so that is the only order satisfying the rule.
 
 This is a rule about **accepting**, not about maintaining. The store
 declines to take an unsigned bootable; it does not promise one stays
-signed forever. That is what keeps it consistent with deletes being
-uncoupled, and it is a fine enough line to state rather than infer.
+signed forever, and it is a fine enough line to state rather than
+infer. (As first written this sentence continued "that is what keeps it
+consistent with deletes being uncoupled" — see the amendment in section
+4, which is what that consistency turned out to cost.)
 
 Note it blocks *publishing* and never *recovering*: if signing breaks,
 no new ISO can be pushed, but every ISO already stored still fetches

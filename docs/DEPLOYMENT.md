@@ -625,10 +625,20 @@ single encoding the two numbers are equal and it says neither twice.
 without re-reading the file, which is how to check what is already
 published before pushing over it — and on dashboard assets.
 
-`delete` unpublishes a name; the blob survives until collected. A push whose
-body does not match its declared `X-Cix-Sha256` is refused with 400, and
-republishing a name with *different* bytes is refused with 409 — a recipe
-version is immutable, so a published name may only ever mean one byte
+`delete` unpublishes a name and, if one is published, the detached
+`.minisig` that belongs to it; the blobs survive until collected. Deleting a
+signature by its own name removes only the signature. The two go together so
+that a name cannot later be re-published on the strength of a signature made
+over bytes that are no longer there (#21) — a leftover signature satisfies
+the unsigned-bootable refusal below, so an orphan would let the next push of
+that name land unsigned.
+
+Deleting a name whose artifact is already absent still removes an orphaned
+signature left by an older daemon, and reports `404` for the artifact.
+
+A push whose body does not match its declared `X-Cix-Sha256` is refused with
+400, and republishing a name with *different* bytes is refused with 409 — a
+recipe version is immutable, so a published name may only ever mean one byte
 sequence.
 
 ## Verifying a deployment

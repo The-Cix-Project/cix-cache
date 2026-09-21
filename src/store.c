@@ -857,14 +857,39 @@ enum store_error store_publish(const char *name, const char *digest)
 	return STORE_OK;
 }
 
-enum store_error store_unpublish(const char *name)
+enum store_error store_unpublish(const char *name, int *signature_removed)
 {
 	char path[PATH_MAX];
+	char sig[STORE_NAME_MAX];
+	char sig_path[PATH_MAX];
 
+	if (signature_removed != NULL)
+		*signature_removed = 0;
 	if (!store_name_is_valid(name))
 		return STORE_ERR_INVALID_NAME;
 	if (entry_path(name, path, sizeof(path)) != 0)
 		return STORE_ERR_INVALID_NAME;
+	/*
+	 * The signature goes first, and its absence is not an error --
+	 * most artifacts carry none. Two unlinks cannot be made atomic, so
+	 * the order chooses which half-done state a failure between them
+	 * can leave: signature gone while the artifact remains is the
+	 * state a separate DELETE of the signature already produces and
+	 * the store already tolerates. The reverse is #21.
+	 *
+	 * Built from the caller's spelling and resolved through the same
+	 * entry_path(), so an alias-named delete removes the canonically
+	 * named signature rather than missing it.
+	 */
+	if (store_signature_name(name, sig, sizeof(sig)) == 0 &&
+	    entry_path(sig, sig_path, sizeof(sig_path)) == 0) {
+		if (unlink(sig_path) == 0) {
+			if (signature_removed != NULL)
+				*signature_removed = 1;
+		} else if (errno != ENOENT) {
+			return STORE_ERR_IO;
+		}
+	}
 	if (unlink(path) != 0)
 		return errno == ENOENT ? STORE_ERR_NOT_FOUND : STORE_ERR_IO;
 	return STORE_OK;

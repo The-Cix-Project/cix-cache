@@ -767,7 +767,14 @@ static void begin_upload(struct conn *cc, const struct http_request *req, const 
 	 * can be produced before either is uploaded. Note this is a rule
 	 * about ACCEPTING, not about maintaining -- the store declines to
 	 * take an unsigned artifact, but does not promise one stays
-	 * signed, so it stays consistent with deletes being uncoupled.
+	 * signed.
+	 *
+	 * It does promise the signature this finds was published for the
+	 * name it is about to accept, which is why store_unpublish()
+	 * removes the two together (#21). While deletes were uncoupled,
+	 * this lookup could be satisfied by a signature made over bytes
+	 * that had since been deleted, and the gate would pass a push it
+	 * exists to refuse.
 	 */
 	if (store_needs_signature(name)) {
 		char sig[STORE_NAME_MAX];
@@ -1721,14 +1728,16 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 		}
 		if (strcmp(req->method, "DELETE") == 0) {
 			enum store_error e;
+			int sig_gone = 0;
 
 			if (!bearer_ok(req, g_conf.push_token)) {
 				respond_error(cc, 401, "push requires a bearer token");
 				return;
 			}
-			e = store_unpublish(name);
+			e = store_unpublish(name, &sig_gone);
 			if (e == STORE_OK)
-				server_log("info", "unpublished %s", name);
+				server_log("info", "unpublished %s%s", name,
+				           sig_gone ? " and its signature" : "");
 			if (e != STORE_OK) {
 				respond_error(cc, e == STORE_ERR_NOT_FOUND ? 404 : 400, store_error_str(e));
 				return;

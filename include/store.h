@@ -356,8 +356,29 @@ enum store_error store_open(const char *name, int *out_fd, off_t *out_size, char
  */
 enum store_error store_publish(const char *name, const char *digest);
 
-/* Removes the published name only. Blobs are removed only by store_gc(). */
-enum store_error store_unpublish(const char *name);
+/*
+ * Removes the published name and the detached signature belonging to
+ * it. Blobs are removed only by store_gc().
+ *
+ * The two leave together because an orphaned signature is not inert.
+ * The publish gate looks one up by a name it derives exactly as
+ * store_signature_name() does here, so a signature left behind by a
+ * delete satisfies that gate for the NEXT push of the same name --
+ * measured in #21, where re-publishing different bytes over a deleted
+ * ISO returned 201 and left the store serving an artifact its own
+ * published signature fails to verify. ADR-0010 section 4 is amended
+ * accordingly; it had called the orphan inert.
+ *
+ * Removing a signature by its own name still removes only itself, so
+ * the uncoupled delete the ADR wanted to keep is still available:
+ * store_signature_name() refuses a name that is already a signature.
+ *
+ * *signature_removed, when non-NULL, reports whether one was found and
+ * removed, so a caller can say so. STORE_ERR_NOT_FOUND still means the
+ * ARTIFACT was absent -- a signature may have been removed on the way
+ * to discovering that, which is how an existing orphan gets cleaned.
+ */
+enum store_error store_unpublish(const char *name, int *signature_removed);
 
 /* 1 if blobs/<digest> exists; fills *out_size when non-NULL. */
 int store_blob_exists(const char *digest, off_t *out_size);

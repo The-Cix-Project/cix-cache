@@ -305,7 +305,7 @@ static void test_canonical_alias(const char *root)
 	      "republishing the same bytes under the canonical name is idempotent");
 
 	/* And unpublishing either spelling removes the one entry. */
-	CHECK(store_unpublish("aliaspkg-1.2.tar.gz") == STORE_OK, "unpublish via the bare name");
+	CHECK(store_unpublish("aliaspkg-1.2.tar.gz", NULL) == STORE_OK, "unpublish via the bare name");
 	CHECK(store_resolve("aliaspkg-1.2-1.tar.gz", got, sizeof(got)) == STORE_ERR_NOT_FOUND,
 	      "the canonical name is gone too -- it was one entry");
 }
@@ -368,6 +368,104 @@ static void test_publish(const char *root)
 	CHECK(store_resolve("absent-9.9.tar.gz", got, sizeof(got)) ==
 	              STORE_ERR_NOT_FOUND,
 	      "a miss is NOT_FOUND, not an error");
+}
+
+/*
+ * #21: a delete used to leave the detached signature behind, and the
+ * orphan was not inert -- the publish gate looks a signature up by the
+ * name it derives from the artifact, so the leftover satisfied it and
+ * the next push of that name landed unsigned. These assert the two
+ * leave together WITHOUT coupling anything else: a signature is still
+ * deletable on its own, which is the half of ADR-0010 section 4 that
+ * survived.
+ */
+static void test_unpublish_signature(const char *root)
+{
+	char digest[STORE_SHA256_MAX];
+	char got[STORE_SHA256_MAX];
+	char tmp[512];
+	int sig_gone = -1;
+
+	snprintf(tmp, sizeof(tmp), "%s/tmp/sigtest", root);
+	write_file(tmp, "signed artifact bytes");
+	CHECK(store_hash_file(tmp, digest, sizeof(digest)) == 0, "hash the test bytes");
+	CHECK(store_blob_adopt(tmp, digest) == STORE_OK, "adopt the blob");
+
+	/* A signed artifact: both names go. */
+	CHECK(store_publish("sigpkg-1.0-1-x86_64.iso", digest) == STORE_OK,
+	      "publish an artifact");
+	CHECK(store_publish("sigpkg-1.0-1-x86_64.iso.minisig", digest) == STORE_OK,
+	      "publish its signature");
+	CHECK(store_unpublish("sigpkg-1.0-1-x86_64.iso", &sig_gone) == STORE_OK,
+	      "unpublish the artifact");
+	CHECK(sig_gone == 1, "and it reports that it removed a signature");
+	CHECK(store_resolve("sigpkg-1.0-1-x86_64.iso", got, sizeof(got)) ==
+	              STORE_ERR_NOT_FOUND,
+	      "the artifact is gone");
+	CHECK(store_resolve("sigpkg-1.0-1-x86_64.iso.minisig", got, sizeof(got)) ==
+	              STORE_ERR_NOT_FOUND,
+	      "and the signature left with it -- no orphan");
+
+	/* An unsigned artifact: absence of a signature is not an error. */
+	CHECK(store_publish("nosig-1.0-1-x86_64.tar.gz", digest) == STORE_OK,
+	      "publish an unsigned artifact");
+	sig_gone = -1;
+	CHECK(store_unpublish("nosig-1.0-1-x86_64.tar.gz", &sig_gone) == STORE_OK,
+	      "unpublishing it succeeds with no signature present");
+	CHECK(sig_gone == 0, "and reports that none was removed");
+
+	/*
+	 * A signature deleted by its own name takes only itself. This is
+	 * the uncoupled delete ADR-0010 wanted kept, and it is why
+	 * store_signature_name() refuses a name that is already a
+	 * signature -- otherwise this would look for a .minisig.minisig
+	 * and, worse, a coupled rule here would delete the artifact when
+	 * asked to delete only its signature.
+	 */
+	CHECK(store_publish("solo-1.0-1-x86_64.iso", digest) == STORE_OK,
+	      "publish an artifact again");
+	CHECK(store_publish("solo-1.0-1-x86_64.iso.minisig", digest) == STORE_OK,
+	      "and its signature");
+	sig_gone = -1;
+	CHECK(store_unpublish("solo-1.0-1-x86_64.iso.minisig", &sig_gone) == STORE_OK,
+	      "unpublish the signature alone");
+	CHECK(sig_gone == 0, "a signature has no signature of its own to remove");
+	CHECK(store_resolve("solo-1.0-1-x86_64.iso", got, sizeof(got)) == STORE_OK,
+	      "the artifact it signed is untouched");
+	CHECK(store_unpublish("solo-1.0-1-x86_64.iso", NULL) == STORE_OK, "clean up");
+
+	/*
+	 * An alias-named delete must remove the CANONICAL signature. The
+	 * signature name is built from the caller's spelling and then run
+	 * through the same canonicalisation as the artifact, so both land
+	 * on the same entry either way.
+	 */
+	CHECK(store_publish("aliassig-2.0-1-x86_64.tar.gz", digest) == STORE_OK,
+	      "publish under the canonical name");
+	CHECK(store_publish("aliassig-2.0-1-x86_64.tar.gz.minisig", digest) == STORE_OK,
+	      "publish the canonical signature");
+	sig_gone = -1;
+	CHECK(store_unpublish("aliassig-2.0-x86_64.tar.gz", &sig_gone) == STORE_OK,
+	      "delete via the release-less spelling");
+	CHECK(sig_gone == 1, "the canonical signature was found through the alias");
+	CHECK(store_resolve("aliassig-2.0-1-x86_64.tar.gz.minisig", got, sizeof(got)) ==
+	              STORE_ERR_NOT_FOUND,
+	      "and removed, rather than missed");
+
+	/*
+	 * An existing orphan is cleaned by deleting the artifact name,
+	 * even though the artifact is already absent. NOT_FOUND describes
+	 * the artifact; it does not mean nothing happened.
+	 */
+	CHECK(store_publish("orphan-1.0-1-x86_64.iso.minisig", digest) == STORE_OK,
+	      "publish a signature whose artifact does not exist");
+	sig_gone = -1;
+	CHECK(store_unpublish("orphan-1.0-1-x86_64.iso", &sig_gone) == STORE_ERR_NOT_FOUND,
+	      "deleting the absent artifact reports NOT_FOUND");
+	CHECK(sig_gone == 1, "but the orphaned signature was removed on the way");
+	CHECK(store_resolve("orphan-1.0-1-x86_64.iso.minisig", got, sizeof(got)) ==
+	              STORE_ERR_NOT_FOUND,
+	      "the orphan is gone");
 }
 
 static void test_gc(const char *root)
@@ -644,11 +742,11 @@ static void test_arch(const char *root)
 	              strcmp(got, digest_a) == 0,
 	      "naming the architecture still resolves");
 
-	CHECK(store_unpublish("barepkg-2.0-1.tar.gz") == STORE_OK, "clean up the unstamped entry");
+	CHECK(store_unpublish("barepkg-2.0-1.tar.gz", NULL) == STORE_OK, "clean up the unstamped entry");
 	CHECK(store_resolve("barepkg-2.0-1.tar.gz", got, sizeof(got)) == STORE_OK &&
 	              strcmp(got, digest_a) == 0,
 	      "with it gone the bare name is unambiguous again");
-	CHECK(store_unpublish("barepkg-2.0-1-aarch64.tar.gz") == STORE_OK, "clean up");
+	CHECK(store_unpublish("barepkg-2.0-1-aarch64.tar.gz", NULL) == STORE_OK, "clean up");
 
 	/*
 	 * The same artifact under two spellings is not ambiguous. Stamping
@@ -674,16 +772,16 @@ static void test_arch(const char *root)
 	      "now a different machine's build joins them");
 	CHECK(store_resolve("twin-1.0-1.tar.gz", got, sizeof(got)) == STORE_ERR_AMBIGUOUS,
 	      "and the bare name refuses again, because now the bytes differ");
-	CHECK(store_unpublish("twin-1.0-1-x86_64.tar.gz") == STORE_OK, "clean up");
-	CHECK(store_unpublish("twin-1.0-1-aarch64.tar.gz") == STORE_OK, "clean up");
-	CHECK(store_unpublish("twin-1.0-1.tar.gz") == STORE_OK, "clean up");
+	CHECK(store_unpublish("twin-1.0-1-x86_64.tar.gz", NULL) == STORE_OK, "clean up");
+	CHECK(store_unpublish("twin-1.0-1-aarch64.tar.gz", NULL) == STORE_OK, "clean up");
+	CHECK(store_unpublish("twin-1.0-1.tar.gz", NULL) == STORE_OK, "clean up");
 
 	/* The stamp refuses a machine it does not know, rather than inventing it. */
 	CHECK(store_set_arch("pdp11", 1, &renamed, &conflicts) == -1,
 	      "an unknown architecture is refused");
 
-	CHECK(store_unpublish("archpkg-1.0-1-x86_64.tar.gz") == STORE_OK, "clean up x86_64");
-	CHECK(store_unpublish("archpkg-1.0-1-aarch64.tar.gz") == STORE_OK, "clean up aarch64");
+	CHECK(store_unpublish("archpkg-1.0-1-x86_64.tar.gz", NULL) == STORE_OK, "clean up x86_64");
+	CHECK(store_unpublish("archpkg-1.0-1-aarch64.tar.gz", NULL) == STORE_OK, "clean up aarch64");
 }
 
 /*
@@ -802,7 +900,7 @@ static void test_release_order(const char *root)
 
 	free(ents);
 	for (i = 0; i < 5; i++)
-		store_unpublish(names[i]);
+		store_unpublish(names[i], NULL);
 }
 
 /*
@@ -1119,6 +1217,7 @@ int main(void)
 	test_version_cmp();
 	test_publish(root);
 	test_gc(root);
+	test_unpublish_signature(root);
 	/*
 	 * After the collector: this one adopts a blob and unpublishes it,
 	 * which would otherwise show up as an extra orphan in gc's counts.
