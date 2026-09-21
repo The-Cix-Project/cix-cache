@@ -274,6 +274,18 @@ static size_t stem_len(const char *name)
 	return suffix != NULL ? strlen(name) - strlen(suffix) : strlen(name);
 }
 
+void store_stem_of(const char *name, char *out, size_t out_size)
+{
+	size_t len = stem_len(name);
+
+	if (out_size == 0)
+		return;
+	if (len >= out_size)
+		len = out_size - 1;
+	memcpy(out, name, len);
+	out[len] = '\0';
+}
+
 int store_name_is_valid(const char *name)
 {
 	size_t len;

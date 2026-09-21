@@ -49,6 +49,16 @@ against another copy of itself, and a chronological manifest diffs as
 noise. Sorted by name, it is byte-identical for identical stores, which
 is what leaving mtime out was always trying to achieve.
 
+Since #22 each section is ordered by **identity** — the stem — with an
+identity's encodings ordered by name inside its `formats` array. That
+is the same order for every name this store has actually held. It is
+not the same for every name it *accepts* — a stem that is another stem
+plus a dotted component sorts between the shorter one's encodings —
+which is why the grouping keys on the stem rather than assuming name
+order keeps an identity's encodings adjacent. The property this
+section exists for is unchanged: identical stores still emit
+byte-identical manifests.
+
 ### 3. Versions compare by rule, not by collation
 
 Upstream versions are taken verbatim and are not semver — `10.4p1`,

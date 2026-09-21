@@ -164,6 +164,18 @@ const char *store_suffix_of(const char *name);
  */
 #define STORE_SIG_EXT ".minisig"
 
+/*
+ * The stem of a published name: everything before the suffix the store
+ * recognises, copied into out.
+ *
+ * Two encodings of one artifact -- zstd-1.5.7-3-x86_64 as .tar.gz and
+ * as .cixpkg -- share it exactly, which is what makes it the identity
+ * both the listing and MANIFEST.json group on. One function because
+ * two groupings that disagreed about where a name ends would put the
+ * same artifact under two identities in two documents.
+ */
+void store_stem_of(const char *name, char *out, size_t out_size);
+
 /* True for a signature object rather than something to install or boot. */
 int store_is_signature(const char *name);
 

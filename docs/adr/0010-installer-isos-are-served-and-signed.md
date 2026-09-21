@@ -199,7 +199,11 @@ than a machine.
 A signature is a column and not a row: `signed` on the ISO's own entry
 in `/api/v1/artifacts`, a column in the dashboard and `cixcachectl ls`
 that appears only once something in view carries one, and a nested
-`signature` object inside the installer's `MANIFEST.json` entry. The
+`signature` object in `MANIFEST.json`. (Since #22 that object sits
+inside the `formats` element it signs rather than directly on the
+entry, because each encoding is signed separately — and for the same
+reason a *package's* signature now appears there too, which the flat
+shape had no room for.) The
 artifact count keeps counting artifacts a person would recognise as
 one; the signature's bytes still show in the size, because that is disk
 truth.
@@ -237,11 +241,17 @@ numbers that appear to disagree.
 
 ### 8. Installers are their own manifest section
 
-`installers`, not inside `packages`. `packages` is consumed by a daemon
-resolving `name@version` for install; an ISO is never installed that
-way and has no recipe behind it. Mixed in, every consumer of `packages`
-would grow a filter, and the first one to forget it would try to
-install an ISO.
+`installers`, not inside `packages`. `packages` is where a package is
+looked up by `name@version`; an ISO is never installed that way and has
+no recipe behind it. Mixed in, every consumer of `packages` would grow
+a filter, and the first one to forget it would try to install an ISO.
+
+(As first written this said `packages` "is consumed by a daemon
+resolving `name@version` for install". ADR-0002 is narrower and
+governs: the daemon "never requests an index", and `MANIFEST.json` is a
+convenience for people writing recipes. The argument above never needed
+the daemon — that an ISO is not looked up by `name@version` is enough
+on its own — so only the sentence changed.)
 
 ## Consequences
 

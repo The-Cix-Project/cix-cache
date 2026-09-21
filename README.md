@@ -115,9 +115,11 @@ answers "what landed". Columns are sortable when you want a different
 question answered — by name to scan for something, by size to find what
 is taking up the room.
 
-`MANIFEST.json` is ordered by name instead, because it is a document
+`MANIFEST.json` is ordered by identity instead, because it is a document
 meant to be compared against another copy of itself; ordered by time it
-would diff as noise.
+would diff as noise. Each identity carries a `formats` array rather than
+one file's fields, so an artifact published as both a `.cixpkg` and a
+`.tar.gz` is one entry with two encodings.
 
 Versions compare by rule rather than by string, so `2.1.10` follows
 `2.1.8` and a prerelease comes *before* its release. The rules, and

@@ -13,32 +13,104 @@
 #include <unistd.h>
 
 /*
- * Looks up the digest the checked-in MANIFEST.json recorded for a
- * given "<tier>/<name>" path, or NULL. The manifest keys entries by
- * artifact name rather than by path, so the "file" field is what has
- * to be matched.
+ * The digest an entry records for one exact "<tier>/<name>" path, or
+ * NULL if this entry is about some other file.
  */
-static const char *manifest_digest_for(const struct json_value *root, const char *file)
+static const char *entry_digest_for(const struct json_value *entry, const char *file)
 {
-	const struct json_value *sec;
+	const char *entry_file;
+
+	if (entry == NULL || entry->type != JSON_OBJECT)
+		return NULL;
+	entry_file = json_as_string(json_object_get(entry, "file"));
+	if (entry_file != NULL && strcmp(entry_file, file) == 0)
+		return json_as_string(json_object_get(entry, "sha256"));
+	return NULL;
+}
+
+/*
+ * Looks up the digest a MANIFEST.json recorded for a given
+ * "<tier>/<name>" path, or NULL. Matched on the "file" field rather
+ * than on the key: an entry is keyed by identity, and one identity may
+ * name more than one file.
+ *
+ * TWO shapes are accepted on purpose, and neither is legacy cruft.
+ *
+ * An export's checked-in manifest (ADR-0001 -- the historical record
+ * this cross-checks bytes against) records one flat entry per
+ * identity: { "file", "sha256", "bytes" }. Those files are historical
+ * and cannot be reissued, so that shape has to be readable forever.
+ *
+ * A manifest this server GENERATES records { "formats": [ ... ] }, one
+ * element per encoding, because an identity can hold both a .cixpkg
+ * and a .tar.gz (#22). Nobody is stopped from saving a served manifest
+ * beside an export and importing that.
+ *
+ * Reading only the flat shape does not fail loudly on such a file, it
+ * fails SILENTLY: no entry matches, so every artifact looks like one
+ * the manifest never mentioned, and an unmentioned artifact is
+ * imported without its bytes being checked against anything. Measured
+ * by removing this branch -- "2 imported, 0 mismatched" on a fixture
+ * whose recorded digests are both deliberately wrong. The manifest's
+ * one job on this path is to be the last place an export's own record
+ * can be checked against its bytes, so not finding it is the failure
+ * that matters, not a mismatch count.
+ */
+static const char *section_digest_for(const struct json_value *sec, const char *file)
+{
 	size_t i;
 
-	if (root == NULL)
-		return NULL;
-	sec = json_object_get(root, "packages");
 	if (sec == NULL || sec->type != JSON_OBJECT)
 		return NULL;
 	for (i = 0; i < sec->u.object.count; i++) {
 		const struct json_value *entry = sec->u.object.values[i];
-		const char *entry_file;
+		const struct json_value *formats;
+		const char *digest;
+		size_t f;
 
 		if (entry == NULL || entry->type != JSON_OBJECT)
 			continue;
-		entry_file = json_as_string(json_object_get(entry, "file"));
-		if (entry_file != NULL && strcmp(entry_file, file) == 0)
-			return json_as_string(json_object_get(entry, "sha256"));
+		formats = json_object_get(entry, "formats");
+		if (formats != NULL && formats->type == JSON_ARRAY) {
+			for (f = 0; f < formats->u.array.count; f++) {
+				digest = entry_digest_for(formats->u.array.items[f], file);
+				if (digest != NULL)
+					return digest;
+			}
+			continue;
+		}
+		digest = entry_digest_for(entry, file);
+		if (digest != NULL)
+			return digest;
 	}
 	return NULL;
+}
+
+/*
+ * BOTH sections are searched, not just "packages".
+ *
+ * An installer's bytes are in the same tree and its entry is in the
+ * same file, but while only "packages" was searched an imported ISO
+ * matched nothing, and an artifact the manifest does not mention is
+ * imported without being checked against anything. Corrupting an ISO
+ * and importing it succeeded silently -- measured, not reasoned.
+ *
+ * That is the one thing an ISO can least afford. It is verified by a
+ * person running minisign against a pinned key, and this import path
+ * is upstream of that: bytes that enter the store here are what a
+ * later signature would be checked against. ADR-0010 refuses an
+ * unsigned bootable at publish for the same reason.
+ */
+static const char *manifest_digest_for(const struct json_value *root, const char *file)
+{
+	const char *digest;
+
+	if (root == NULL)
+		return NULL;
+	digest = section_digest_for(json_object_get(root, "packages"), file);
+	if (digest != NULL)
+		return digest;
+	return section_digest_for(json_object_get(root, "installers"), file);
 }
 
 static struct json_value *load_manifest(const char *path)

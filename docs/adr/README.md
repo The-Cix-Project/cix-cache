@@ -17,10 +17,10 @@ reasoning incoherent.
 | [0006](0006-packages-are-the-only-tier.md) | Packages are the only tier | accepted; supersedes the image half of 0001–0003 |
 | [0007](0007-canonical-artifact-names.md) | Canonical names `name-version-release`, and aliasing the old ones | accepted; architecture section superseded by 0008 |
 | [0008](0008-architecture-in-artifact-names.md) | Architecture is part of an artifact's identity | accepted; supersedes 0007's architecture section |
-| [0009](0009-ordering.md) | How listings, manifests and versions are ordered | accepted |
+| [0009](0009-ordering.md) | How listings, manifests and versions are ordered | accepted; manifest ordering amended by #22 |
 | [0010](0010-installer-isos-are-served-and-signed.md) | Installer ISOs are served, and signed | accepted; refines 0006; section 4 amended by #21 |
 | [0011](0011-brand-typography-and-palette.md) | The dashboard follows the Cix brand system | accepted |
-| [0012](0012-cixpkg-and-signature-policy.md) | CIXPKG is a package format; the listing groups by identity; the signature rule is policy | accepted; refines 0006, 0009 and 0010 |
+| [0012](0012-cixpkg-and-signature-policy.md) | CIXPKG is a package format; the listing groups by identity; the signature rule is policy | accepted; refines 0006, 0009 and 0010; section 3 amended by #22 |
 | [0013](0013-the-daemon-wears-the-grammar-it-enforces.md) | The daemon's build identity is a canonical artifact name | accepted, amended in v2.18.1; refines 0007 and 0008 |
 | [0014](0014-fuzzing-under-clang.md) | The toolchain mandate governs what ships, not what a developer may run: fuzz harnesses build under clang | accepted in v2.21.0; narrows 0001 |
 

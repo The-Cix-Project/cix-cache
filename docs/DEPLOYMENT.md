@@ -473,9 +473,9 @@ recipe → artifact chain — a daemon resolving `name@version` for install
 must learn the exact name from a recipe in git, never by asking this
 server what exists.
 
-An installer ISO is not on that path, and ADR-0010 section 7 says so
-directly: `packages` is consumed by a daemon resolving `name@version`;
-an ISO is never installed that way. It is chosen by a person and
+An installer ISO is not on that path, and ADR-0010 section 8 says so
+directly: `packages` is the section a package is looked up in by
+`name@version`; an ISO is never installed that way. It is chosen by a person and
 written to a USB stick. This script reads the listing the way the
 dashboard reads it — for a human — which is the audience the listing
 is for.
@@ -602,6 +602,51 @@ cix cache gc --token=<t>                # remove unreferenced blobs
 cix cache delete NAME --token=<t>       # unpublish a name
 cix cache publish FILE --name=N --sha256=H --token=<t>
 ```
+
+### What `MANIFEST.json` looks like
+
+Two sections, `packages` and `installers`, each an object keyed by
+**identity** — `<name>-<version>-<release>-<arch>`, with no suffix. An
+identity carries a `formats` array, one element per encoding it holds,
+because one identity can hold both a `.cixpkg` and a `.tar.gz` while
+Cix migrates between them:
+
+```json
+{
+  "packages": {
+    "zstd-1.5.4-1-x86_64": {
+      "formats": [
+        { "format": ".cixpkg",
+          "file": "packages/zstd-1.5.4-1-x86_64.cixpkg",
+          "sha256": "2b7e0c42…", "bytes": 267063,
+          "signature": { "file": "packages/zstd-1.5.4-1-x86_64.cixpkg.minisig",
+                         "sha256": "a31871bd…", "bytes": 321 } },
+        { "format": ".tar.gz",
+          "file": "packages/zstd-1.5.4-1-x86_64.tar.gz",
+          "sha256": "64ab7e3f…", "bytes": 531982 }
+      ]
+    }
+  },
+  "installers": {}
+}
+```
+
+A signature is nested inside the element it signs, and never a key of
+its own — each encoding has different bytes and so a different
+signature. `installers` uses the same element shape, with one `.iso`.
+
+The array replaced a flat `{file, sha256, bytes}` on the entry in #22.
+Keyed by identity while written once per file, the same key was emitted
+twice as soon as a store held two encodings, and duplicate names are
+implementation-defined in JSON — so a reader taking the first entry and
+one taking the last disagreed about the digest. If you have a script
+reading `.packages["<id>"].sha256`, it now reads
+`.packages["<id>"].formats[] | select(.format == ".tar.gz") | .sha256`.
+
+**These checksums are a convenience, not an authority.** The recipe in
+git is what approves an artifact's bytes; this file is generated from
+the tree on request and is here so a person writing a recipe can find a
+size and a digest without downloading the artifact.
 
 Verbs follow the Cix CLI grammar: `list`, `publish`, `delete`. The
 older `ls`, `put` and `rm` keep working as aliases and are not going

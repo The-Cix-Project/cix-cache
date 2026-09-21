@@ -98,6 +98,29 @@ the daemon-facing contract and count files, ungrouped — two encodings
 of one artifact really are two files on disk, and that is what an
 operator asking about disk wants to know.
 
+**Amended by #22: `MANIFEST.json` groups too.** The scoping above holds
+for `/api/v1/status`, which *counts* — a count of files is a fact about
+disk and stays ungrouped. It could not hold for `MANIFEST.json`, and
+the reason is structural rather than a matter of taste: that file is a
+JSON **object keyed by identity**, so "one entry per file, ungrouped"
+and "one key per identity" cannot both be true. What it actually
+produced, the first time a store held two encodings of one identity,
+was the same key written twice with different `file`, `sha256` and
+`bytes` — a document with no single meaning, since duplicate names are
+implementation-defined in RFC 8259 and this repo's own reader takes the
+first while `jq` and Python take the last.
+
+So a `packages` or `installers` entry now carries a `formats` array,
+one element per encoding, in the same vocabulary section 3 gave the
+listing. Grouping was never optional here; only its absence was.
+
+The other premise is worth correcting while it is being touched: this
+section calls `MANIFEST.json` "the daemon-facing contract". ADR-0002 is
+narrower and disagrees — the daemon "never requests an index", and this
+file is "a convenience for humans writing recipes" whose checksums are
+explicitly not authoritative. Nothing on an install path reads it, and
+that is precisely why changing its shape was affordable.
+
 ### 4. The signature requirement is configuration, defaulting to today
 
 `require_signature`, a list of suffixes that may not be published
@@ -139,9 +162,10 @@ precondition for item 4 rather than a tidy-up.
 
 While they were one function, turning the requirement on for `.cixpkg`
 would have moved every `.cixpkg` **out of `MANIFEST.json`'s `packages`
-section** — the section a Cix daemon resolves `name@version` from — and
-into `installers`, where nothing installs from. A configuration key
-would have quietly unpublished the store's whole reason to exist. It
+section** — the section a package is looked up in by `name@version` —
+and into `installers`, which describes bootables. A configuration key
+would have quietly moved the store's whole reason to exist into the
+section nobody looks for a package in. It
 would also have counted every package as a bootable installer in
 `/api/v1/status` and the dashboard.
 

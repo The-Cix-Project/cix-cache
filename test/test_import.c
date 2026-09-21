@@ -133,6 +133,82 @@ int main(void)
 	CHECK(st.imported == 0, "a second run imports nothing");
 	CHECK(st.already == 2, "a second run recognises what it already did");
 
+	/*
+	 * A manifest in the SERVED shape imports too.
+	 *
+	 * The importer's own input is an export's checked-in record
+	 * (ADR-0001), which is flat: one { file, sha256, bytes } per
+	 * identity. A manifest this server generates is not -- since #22
+	 * an identity carries a "formats" array, because it may hold both
+	 * a .cixpkg and a .tar.gz. Nothing stops somebody saving a served
+	 * manifest beside a tree and importing that. Before the importer
+	 * read both shapes the result was not a loud failure but a silent
+	 * one: no entry matched, so every artifact looked unmentioned, and
+	 * an unmentioned artifact is imported WITHOUT its bytes being
+	 * checked. Removing the formats branch turns the assertions below
+	 * into "2 imported, 0 mismatched" on deliberately wrong digests.
+	 *
+	 * Both encodings of one identity are checked, since finding only
+	 * the first element would pass a single-format fixture.
+	 */
+	{
+		char root2[] = "/tmp/cixcache-test-import2-XXXXXX";
+		char m2[512];
+		char f1[512];
+		char f2[512];
+		char f3[512];
+		struct import_stats s2;
+
+		if (mkdtemp(root2) == NULL || store_init(root2) != 0) {
+			fprintf(stderr, "FAIL: cannot set up the served-shape store\n");
+			return 1;
+		}
+		snprintf(f1, sizeof(f1), "%s/packages/zstd-1.5.4-1-x86_64.tar.gz", root2);
+		snprintf(f2, sizeof(f2), "%s/packages/zstd-1.5.4-1-x86_64.cixpkg", root2);
+		snprintf(f3, sizeof(f3), "%s/packages/cix-installer-9.9-1-x86_64.iso", root2);
+		write_file(f1, "targz bytes");
+		write_file(f2, "cixpkg bytes");
+		write_file(f3, "iso bytes");
+
+		snprintf(m2, sizeof(m2), "%s/MANIFEST.json", root2);
+		write_file(m2,
+		           "{\"packages\":{\"zstd-1.5.4-1-x86_64\":{\"formats\":["
+		           "{\"format\":\".cixpkg\",\"file\":\"packages/zstd-1.5.4-1-x86_64.cixpkg\","
+		           "\"sha256\":\"e2c5b1d02bbb5f2e4a5d7d98b47a9e1e0b8a9bb0a2b3c7a5b6b5b0cf3a0d9a91\","
+		           "\"bytes\":12},"
+		           "{\"format\":\".tar.gz\",\"file\":\"packages/zstd-1.5.4-1-x86_64.tar.gz\","
+		           "\"sha256\":\"9a0f8f9b0e4f7a1c2d3e4f5061728394a5b6c7d8e9fa0b1c2d3e4f5061728394\","
+		           "\"bytes\":11}]}},"
+		           "\"installers\":{\"cix-installer-9.9-1-x86_64\":{\"formats\":["
+		           "{\"format\":\".iso\",\"file\":\"packages/cix-installer-9.9-1-x86_64.iso\","
+		           "\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\","
+		           "\"bytes\":9}]}}}");
+
+		memset(&s2, 0, sizeof(s2));
+		importer_run(root2, m2, 1, &s2);
+		/*
+		 * Both digests are deliberately wrong, so both must be
+		 * MISMATCHED rather than silently imported. That is what
+		 * proves the digests were FOUND: unfound ones are reported the
+		 * same way an absent entry is, and a fixture with correct
+		 * digests could not tell the two apart.
+		 */
+		/*
+		 * Three, not two: the ISO counts. While only "packages" was
+		 * searched, an installer matched no entry, and an artifact the
+		 * manifest does not mention is imported with its bytes checked
+		 * against nothing -- so a corrupted ISO entered the store
+		 * silently. That is the artifact that can least afford it: a
+		 * person verifies an ISO with minisign against a pinned key,
+		 * and this path is upstream of the bytes that signature would
+		 * be checked against.
+		 */
+		CHECK(s2.mismatched == 3,
+		      "every format in a served manifest is found and checked, installers included");
+		CHECK(s2.imported == 0, "and none is imported on a bad digest");
+		store_init(root);
+	}
+
 	if (g_failures == 0)
 		printf("test_import: ok\n");
 	else

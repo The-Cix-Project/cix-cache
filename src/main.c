@@ -901,23 +901,6 @@ static long distinct_names(struct list_ctx *lc)
 }
 
 /*
- * The stem of a published name: everything before the suffix the store
- * recognises. Two encodings of one artifact -- zstd-1.5.7-3-x86_64
- * as .tar.gz and as .cixpkg -- share it exactly, which is what makes
- * it the identity these records are grouped on.
- */
-static void stem_of(const char *name, char *out, size_t out_size)
-{
-	const char *suffix = store_suffix_of(name);
-	size_t len = suffix != NULL ? strlen(name) - strlen(suffix) : strlen(name);
-
-	if (len >= out_size)
-		len = out_size - 1;
-	memcpy(out, name, len);
-	out[len] = '\0';
-}
-
-/*
  * One identity, and every encoding of it the store holds.
  *
  * The listing is grouped rather than flat because a format change is
@@ -950,8 +933,8 @@ static int cmp_by_stem(const void *a, const void *b)
 	char ys[STORE_NAME_MAX];
 	int r;
 
-	stem_of(x->name, xs, sizeof(xs));
-	stem_of(y->name, ys, sizeof(ys));
+	store_stem_of(x->name, xs, sizeof(xs));
+	store_stem_of(y->name, ys, sizeof(ys));
 	r = strcmp(xs, ys);
 	if (r != 0)
 		return r;
@@ -1347,7 +1330,7 @@ static int build_identities(struct store_entry **ents, int n, struct identity *o
 	for (i = 0; i < n; i++) {
 		char stem[STORE_NAME_MAX];
 
-		stem_of(ents[i]->name, stem, sizeof(stem));
+		store_stem_of(ents[i]->name, stem, sizeof(stem));
 		if (g == 0 || strcmp(out[g - 1].stem, stem) != 0) {
 			memset(&out[g], 0, sizeof(out[g]));
 			snprintf(out[g].stem, sizeof(out[g].stem), "%s", stem);

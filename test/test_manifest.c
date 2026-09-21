@@ -50,6 +50,50 @@ static int count_key(const char *json, size_t len, const char *key)
 	return n;
 }
 
+/*
+ * A string compare that survives a missing field. The shape changed in
+ * #22 and the assertions below went from failing to SEGFAULTING,
+ * because json_as_string() on an absent key is NULL and strcmp() does
+ * not take one. A test that crashes reports nothing at all.
+ */
+static int streq(const char *a, const char *b)
+{
+	return a != NULL && b != NULL && strcmp(a, b) == 0;
+}
+
+/* The element of an entry's "formats" array for one suffix, or NULL. */
+static const struct json_value *format_of(const struct json_value *entry, const char *ext)
+{
+	const struct json_value *formats;
+	size_t i;
+
+	if (entry == NULL || entry->type != JSON_OBJECT)
+		return NULL;
+	formats = json_object_get(entry, "formats");
+	if (formats == NULL || formats->type != JSON_ARRAY)
+		return NULL;
+	for (i = 0; i < formats->u.array.count; i++) {
+		const struct json_value *el = formats->u.array.items[i];
+
+		if (streq(json_as_string(json_object_get(el, "format")), ext))
+			return el;
+	}
+	return NULL;
+}
+
+/* How many encodings an entry carries. */
+static size_t format_count(const struct json_value *entry)
+{
+	const struct json_value *formats;
+
+	if (entry == NULL || entry->type != JSON_OBJECT)
+		return 0;
+	formats = json_object_get(entry, "formats");
+	if (formats == NULL || formats->type != JSON_ARRAY)
+		return 0;
+	return formats->u.array.count;
+}
+
 static void publish_fixture(const char *root, const char *name, const char *content)
 {
 	char digest[STORE_SHA256_MAX];
@@ -94,12 +138,14 @@ int main(void)
 	CHECK(sec != NULL && sec->type == JSON_OBJECT, "packages section present");
 	entry = json_object_get(sec, "bash-5.2.37-2");
 	CHECK(entry != NULL, "package keyed by name-version, without the .tar.gz suffix");
-	CHECK(entry != NULL &&
-	              strcmp(json_as_string(json_object_get(entry, "file")),
-	                     "packages/bash-5.2.37-2.tar.gz") == 0,
+	CHECK(format_count(entry) == 1, "one encoding, so one element in formats");
+	CHECK(streq(json_as_string(json_object_get(format_of(entry, ".tar.gz"), "file")),
+	            "packages/bash-5.2.37-2.tar.gz"),
 	      "package file path");
-	CHECK(entry != NULL && json_as_number(json_object_get(entry, "bytes")) == 13,
+	CHECK(json_as_number(json_object_get(format_of(entry, ".tar.gz"), "bytes")) == 13,
 	      "package byte count comes from the blob");
+	CHECK(json_object_get(entry, "file") == NULL,
+	      "the identity carries no file of its own -- a file belongs to an encoding");
 
 	CHECK(json_object_get(parsed, "images") == NULL,
 	      "no images section -- packages are the only tier");
@@ -116,10 +162,10 @@ int main(void)
 	 * where it would have done real damage: the sections are split on
 	 * the tier, and while the two questions were one function,
 	 * requiring a signature for .cixpkg would have moved every
-	 * .cixpkg out of "packages" -- the section a Cix daemon resolves
-	 * name@version from -- and into "installers", where nothing
-	 * installs from. An operator tightening a policy would have
-	 * unpublished the store.
+	 * .cixpkg out of "packages" -- the section a package is looked up
+	 * in by name@version -- and into "installers", which describes
+	 * bootables. An operator tightening a policy would have moved
+	 * every package into the section nobody looks for one in.
 	 */
 	{
 		char bad[64];
@@ -180,20 +226,20 @@ int main(void)
 			 */
 			CHECK(count_key(w.buf, w.len, "cix-installer-2.5.0-1-x86_64") == 1,
 			      "exactly one entry carries that key, not one per file sharing the stem");
-			CHECK(inst != NULL &&
-			              strcmp(json_as_string(json_object_get(inst, "file")),
-			                     "packages/cix-installer-2.5.0-1-x86_64.iso") == 0,
+			CHECK(format_count(inst) == 1,
+			      "one encoding -- the signature is not a second one");
+			CHECK(streq(json_as_string(json_object_get(format_of(inst, ".iso"), "file")),
+			            "packages/cix-installer-2.5.0-1-x86_64.iso"),
 			      "and its file is the ISO, never the signature that shares its stem");
-			CHECK(inst != NULL && json_as_number(json_object_get(inst, "bytes")) == 9,
+			CHECK(json_as_number(json_object_get(format_of(inst, ".iso"), "bytes")) == 9,
 			      "with the ISO's byte count, not the signature's");
 			{
 				const struct json_value *sig =
-				        inst != NULL ? json_object_get(inst, "signature") : NULL;
+				        json_object_get(format_of(inst, ".iso"), "signature");
 
-				CHECK(sig != NULL, "the signature is nested inside it");
-				CHECK(sig != NULL &&
-				              strcmp(json_as_string(json_object_get(sig, "file")),
-				                     "packages/cix-installer-2.5.0-1-x86_64.iso.minisig") == 0,
+				CHECK(sig != NULL, "the signature is nested inside the format it signs");
+				CHECK(streq(json_as_string(json_object_get(sig, "file")),
+				            "packages/cix-installer-2.5.0-1-x86_64.iso.minisig"),
 				      "and that is the only place it appears");
 			}
 			/* Nor is it a row in the other section. */
@@ -204,6 +250,63 @@ int main(void)
 		}
 		jw_free(&w);
 	}
+	/*
+	 * #22. Two encodings of one identity: ONE key, two formats.
+	 *
+	 * This is the case that did not exist anywhere until a real
+	 * CIXPKG was built (#18) -- every store had `artifacts holding
+	 * more than one encoding: 0`, so emit_key() writing once per FILE
+	 * looked identical to writing once per identity. With both
+	 * present it emitted the same key twice, and the file stopped
+	 * having one meaning: this repo's json_object_get() takes the
+	 * first match and Python and jq take the last, so two readers
+	 * disagreed about which encoding and which digest the identity
+	 * had.
+	 *
+	 * count_key() on the raw text is the assertion that bites. A
+	 * lookup-based check passes on a duplicated key by finding
+	 * whichever came first, which is exactly how this survived a test
+	 * that looked like it covered it.
+	 */
+	{
+		const struct json_value *both;
+
+		publish_fixture(root, "coexist-9.9-1-x86_64.tar.gz", "tar.gz bytes");
+		publish_fixture(root, "coexist-9.9-1-x86_64.cixpkg", "cixpkg bytes here");
+
+		jw_init(&w);
+		manifest_write_json(&w);
+		parsed = json_parse(w.buf, w.len);
+		CHECK(parsed != NULL, "manifest with two encodings is valid JSON");
+		if (parsed != NULL) {
+			sec = json_object_get(parsed, "packages");
+			both = sec != NULL ? json_object_get(sec, "coexist-9.9-1-x86_64") : NULL;
+			CHECK(both != NULL, "the identity is present");
+			CHECK(count_key(w.buf, w.len, "coexist-9.9-1-x86_64") == 1,
+			      "written ONCE, not once per encoding -- the #22 defect");
+			CHECK(format_count(both) == 2, "and carries both encodings");
+			CHECK(streq(json_as_string(json_object_get(format_of(both, ".cixpkg"), "file")),
+			            "packages/coexist-9.9-1-x86_64.cixpkg"),
+			      "the .cixpkg element names the .cixpkg");
+			CHECK(streq(json_as_string(json_object_get(format_of(both, ".tar.gz"), "file")),
+			            "packages/coexist-9.9-1-x86_64.tar.gz"),
+			      "the .tar.gz element names the .tar.gz");
+			/*
+			 * Distinct digests and sizes per element. Sharing the
+			 * identity must not mean sharing the bytes -- conflating
+			 * them would reintroduce the ambiguity in a new shape.
+			 */
+			CHECK(json_as_number(json_object_get(format_of(both, ".tar.gz"), "bytes")) == 12 &&
+			              json_as_number(json_object_get(format_of(both, ".cixpkg"), "bytes")) == 17,
+			      "each encoding reports its own size");
+			CHECK(!streq(json_as_string(json_object_get(format_of(both, ".tar.gz"), "sha256")),
+			             json_as_string(json_object_get(format_of(both, ".cixpkg"), "sha256"))),
+			      "and its own digest");
+			json_free(parsed);
+		}
+		jw_free(&w);
+	}
+
 	if (g_failures == 0)
 		printf("test_manifest: ok\n");
 	else
