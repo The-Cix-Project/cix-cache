@@ -823,6 +823,18 @@ a:hover {
 }
 
 /*
+ * Same reason as main[hidden] and #help[hidden]: the display above is
+ * an author rule and the `hidden` attribute is only the UA
+ * stylesheet's, so it loses. refreshLog() sets .hidden when
+ * /api/v1/log answers 401, which is every anonymous visitor to a
+ * public instance -- without this the dock stayed rendered, offering a
+ * toggle over a feed the server had just refused.
+ */
+#logdock[hidden] {
+	display: none;
+}
+
+/*
  * Grab strip on the dock's top edge. Sits over the border so the
  * target is easier to hit than the 1px line it appears to be.
  *
