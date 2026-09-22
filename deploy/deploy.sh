@@ -225,11 +225,32 @@ fi
 # file beside it. The binary reports a canonical artifact name carrying
 # its own tag (ADR-0013), so it is the only thing that can say for
 # certain which release is on disk.
-WANT="cix-cache-$TAG-1-$(uname -m)"
+#
+# What the checkout WILL build is asked of the Makefile, for exactly the
+# same reason. version.h is .PHONY, so generating it here is the
+# identical computation the compiler is about to see, and there is only
+# one of it.
+#
+# Spelling the name here instead -- `cix-cache-$TAG-1-$(uname -m)` --
+# was a second implementation of ADR-0013's grammar, and it was wrong
+# twice over. It assumed the ref is a version string, and it hardcoded
+# release 1.
+#
+# A tag IS release 1, so the default never noticed. Two things did:
+# CIXCACHE_REF pointed at a branch produced a WANT no binary could ever
+# report, so the deployer rebuilt, re-tested and reinstalled on every
+# timer run, hourly, forever. And no release past 1 could be deployed
+# at all -- the only thing that could change the name being compared
+# against was a fresh tag, so an instance sat at r1 while r2 and r3
+# existed and were invisible to it.
+make -C "$SRC" --quiet build/version.h >/dev/null 2>&1 \
+	|| die "cannot compute the build identity for $TAG"
+WANT=$(sed -n 's/.*CIXCACHE_BUILD_VERSION "\(.*\)".*/\1/p' "$SRC/build/version.h")
+[ -n "$WANT" ] || die "build/version.h carried no build identity for $TAG"
 HAVE=$("$PREFIX/bin/cixcached" --version 2>/dev/null | awk '{print $1}' || true)
 
 if [ "$HAVE" = "$WANT" ]; then
-	say "Build: already at $TAG"
+	say "Build: already at $WANT"
 else
 	say "Build: $HAVE -> $WANT"
 	make -C "$SRC" --quiet clean >/dev/null

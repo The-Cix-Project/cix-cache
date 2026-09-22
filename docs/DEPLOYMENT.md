@@ -50,7 +50,7 @@ Everything is a variable:
 |---|---|---|
 | `CIXCACHE_DOMAIN` | `cache.cix.world` | the public name |
 | `CIXCACHE_REPO` | the GitHub mirror | where source comes from |
-| `CIXCACHE_REF` | latest `v*` tag | pin to deploy one release |
+| `CIXCACHE_REF` | latest `v*` tag | pin a release, or track a branch |
 | `CIXCACHE_PREFIX` | `/opt/cixcache` | binaries, web assets, config |
 | `CIXCACHE_STORE` | `/var/lib/cixcache` | the store |
 | `CIXCACHE_USER` | `cixcache` | the service account it creates |
@@ -199,6 +199,26 @@ The timer re-runs the deployer hourly with a randomised delay, so every
 machine on this schedule does not ask GitHub at the same second. It
 picks up a new **release tag** — tagging is what deploys. Nothing on
 `main` reaches a public endpoint by itself.
+
+That default means a public instance only ever runs **release 1**, since
+a tag is by definition zero commits past itself and the release number
+counts distance from the tag. Commits that land after a tag are
+unreachable until the next one, which is the intended gate and not an
+accident.
+
+An instance that should follow them sets `CIXCACHE_REF` to a branch:
+
+```
+CIXCACHE_REF=main
+```
+
+The deployer then deploys `main` and picks up r2, r3, r4 as they land,
+because what it compares against is the identity the checkout will
+actually build — asked of the Makefile, which is the only thing that
+computes it. Use this for an internal or staging instance; the reason
+the default is a tag is unchanged, and an in-progress afternoon on
+`main` is still not something a public endpoint should pick up by
+itself.
 
 The deployer installs a copy of itself at
 `$CIXCACHE_PREFIX/bin/cix-cache-deploy` and the timer runs that, not the
