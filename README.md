@@ -220,3 +220,10 @@ codes, CLI commands and how the store works.
   `docs/adr/README.md`. Their figures are dated observations rather than
   current facts: an ADR records the evidence a decision was made on, so
   the numbers are left alone and date-stamped rather than refreshed.
+
+## Licence
+
+cix-cache is free software under the [GNU General Public License, version
+3](LICENSE), or (at your option) any later version (`GPL-3.0-or-later`). The
+Cix name and marks, and what counts as an official Cix artifact, are governed
+separately by [TRADEMARK.md](TRADEMARK.md).
