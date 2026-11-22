@@ -79,6 +79,13 @@ ssize_t cix_conn_read(struct cix_conn *k, void *buf, size_t n);        /* >0, 0 
 void cix_conn_close(struct cix_conn *k);
 
 /*
+ * cix_conn_read(), giving up after timeout_ms: -1 with errno EAGAIN
+ * then, and the connection stays usable. For waiting on an interim
+ * "100 Continue" from a server that may never send one.
+ */
+ssize_t cix_conn_read_timeout(struct cix_conn *k, void *buf, size_t n, int timeout_ms);
+
+/*
  * One request and its whole response. body may be NULL; when given it
  * is sent as application/json. token, when non-NULL and non-empty, is
  * sent as "Authorization: Bearer". Returns 0 with *out filled (free it

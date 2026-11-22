@@ -4,7 +4,10 @@
 
 Accepted. The image-tier PUT/HEAD paths described here were removed
 in v2.0.0 -- see ADR-0006. The protocol, the auth asymmetry and the
-immutability rule are unchanged for the package tier.
+immutability rule are unchanged for the package tier. Amended by #7,
+and by #24: refusals are decided before the body, `Expect:
+100-continue` is answered, and a refused connection half-closes instead
+of resetting.
 
 ## Context
 
@@ -125,6 +128,41 @@ passed against the buggy code for exactly that reason.
 
 An ambiguous name (ADR-0008) is likewise a refusal and not a fault, and
 returns 409 rather than the 500 it originally produced.
+
+### Amendment, #24: a refusal is decided before the body, and heard
+
+The server answered a refused push before reading its body, then closed
+the socket with that body still unread. Closing with unread bytes makes
+the kernel send RST, and an RST discards any response the client has
+not read yet. curl, still uploading, saw no status at all for about 4%
+of refused 200 KB pushes (8 of 200, measured 2026-11-22). That was the
+`test_push` flake. Over HTTPS a failed write ends the session, so for
+any body larger than the socket buffers the answer was always lost.
+Three changes:
+
+- **Everything that can refuse a push is checked before the body.**
+  This adds the immutability conflict, checked against the declared
+  `X-Cix-Sha256` through the same `refuse_if_taken()` that guards
+  adoption, so a body that matches its declaration gets the same
+  answer from both. A body that does not match was refused anyway, and
+  now as 409 rather than 400. The check after hashing stays, and is
+  still the authoritative one.
+- **`Expect: 100-continue` is answered.** `100 Continue` is sent only
+  once every check has passed and no body has arrived; a refusal is
+  sent instead of it. curl adds the header by itself for bodies over
+  1 MB and waited a second for nothing on every large publish (a 5 MB
+  push went from 1037 ms to 23 ms). `cix cache publish` asks for it,
+  and against a server that never answers it sends the body after a
+  second, as curl does.
+- **A response that leaves a body unread half-closes.** The server
+  sends close_notify under TLS and `shutdown(SHUT_WR)`, then reads and
+  discards the rest of the body until it ends, the client closes, 4 MiB
+  have been discarded, or 5 seconds have passed, whichever comes first.
+  That is an absolute deadline, so a client trickling bytes cannot hold
+  the connection open. The bytes are never staged and never parsed. A
+  client that ignores 100-continue and sends more than 4 MiB can still
+  lose the answer. That limit is deliberate: this is work done for a
+  caller the server has just refused.
 
 ## Consequences
 

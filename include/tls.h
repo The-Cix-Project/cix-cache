@@ -55,6 +55,14 @@ struct ssl_st *tls_session_new(struct ssl_ctx_st *ctx, int fd);
 void tls_session_free(struct ssl_st *s);
 
 /*
+ * Sends close_notify now, once and without waiting, while the session
+ * stays readable: a connection that has answered and is draining the
+ * rest of a refused upload tells the client the response is complete
+ * this way, then keeps reading (#24).
+ */
+void tls_close_notify(struct ssl_st *s);
+
+/*
  * Like read() and write() on a non-blocking socket: >0 bytes moved;
  * 0 from tls_recv() for end of stream; -1 with errno EAGAIN when it
  * would block, *want then holding the epoll event to wait for

@@ -270,6 +270,12 @@ cixctl --host=&lt;box&gt; pkg sync</code></pre>
 			again.
 		</p>
 		<p>
+			Every refusal is decided from the headers, before any of the body is read. Send
+			<code>Expect: 100-continue</code> &mdash; curl does by itself for bodies over
+			1&nbsp;MB &mdash; and the server answers <code>100 Continue</code> or its refusal
+			before a byte of the file is sent.
+		</p>
+		<p>
 			<code>DELETE /&lt;name&gt;.tar.gz</code> unpublishes a name. The bytes survive until
 			collected, because another name may share them.
 		</p>

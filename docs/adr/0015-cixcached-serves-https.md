@@ -151,13 +151,13 @@ tools agree if that lands. A response shorter than its Content-Length
 is an error, since a TLS client that reads to close has no other way
 to tell a cut-off body from a complete one.
 
-One limit is known. A server that refuses a publish answers before
-reading the body, then closes. Over plain HTTP the client still reads
-that answer and reports it. Over HTTPS, a write that fails ends the
-session, so for a body larger than the socket buffers the status is
-lost, and `cix cache` says the server refused partway through without
-saying why. Closing that gap needs `Expect: 100-continue` in the
-server, which is a change of its own.
+A refused publish over HTTPS used to lose its status. The server
+answered before reading the body and closed, and over TLS a write that
+fails ends the session. #24 closed that gap (see ADR-0003's amendment).
+The server decides every refusal before the body, answers
+`Expect: 100-continue`, and half-closes rather than resetting.
+`cix cache publish` asks for 100-continue, so its refusals arrive before
+any of the body is sent, at any size.
 
 The cost is that cix-cache no longer shares a client with Cix. If
 cix#726 lands, copying it back is a choice to make then, not an

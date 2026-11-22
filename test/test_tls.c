@@ -308,6 +308,47 @@ static void test_cli(void)
 	CHECK(cli(NULL, args, out, sizeof(out)) != 0 && strstr(out, "403") != NULL,
 	      "a publish to the read-only plain port reports the 403, mid-upload or not");
 
+	/*
+	 * #24 over HTTPS. 8 MB is past the server's drain cap, so only
+	 * Expect: 100-continue can bring the 401 back: the server refuses on
+	 * the headers and the body is never sent. Before, a failed TLS write
+	 * took the answer down with the session.
+	 */
+	{
+		char big[400];
+		char bigsum[128];
+
+		snprintf(big, sizeof(big), "%s/cli-big.src", g_dir);
+		ts_make_file(big, 8 * 1024 * 1024);
+		ts_sha256(big, bigsum, sizeof(bigsum));
+		snprintf(args, sizeof(args), "%s publish '%s' --name=big2-1.0-1-x86_64.cixpkg "
+		                             "--sha256=%s --token=wrong",
+		         server, big, bigsum);
+		CHECK(cli(NULL, args, out, sizeof(out)) != 0 && strstr(out, "HTTP 401") != NULL,
+		      "an 8 MB publish refused over HTTPS reports its 401");
+
+		/*
+		 * And without Expect, under the cap: the server half-closes,
+		 * sends close_notify and drains, so the answer survives TLS.
+		 */
+		{
+			char opts[900];
+			char cmd[1600];
+			char code[64];
+
+			unlink(big);
+			ts_make_file(big, 2 * 1024 * 1024);
+			ts_sha256(big, bigsum, sizeof(bigsum));
+			snprintf(opts, sizeof(opts),
+			         "-o /dev/null -w '%%{http_code}' -H 'Expect:' -X PUT -T '%s' "
+			         "-H 'Authorization: Bearer wrong' -H 'X-Cix-Sha256: %s'",
+			         big, bigsum);
+			https_cmd(cmd, sizeof(cmd), opts, "/big3-1.0-1-x86_64.cixpkg");
+			ts_capture(cmd, code, sizeof(code));
+			CHECK(atoi(code) == 401, "a 2 MB refused upload without Expect still gets its 401 over TLS");
+		}
+	}
+
 	snprintf(args, sizeof(args), "--server=https://localhost:%d/x status", TLS_PORT);
 	CHECK(cli(NULL, args, out, sizeof(out)) == 2, "a server URL with a path is refused");
 	snprintf(args, sizeof(args), "--server=https://localhost:%d --port=1 status", TLS_PORT);

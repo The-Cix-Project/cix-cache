@@ -50,6 +50,22 @@
 #define TLS_CHUNK (64 * 1024)
 
 /*
+ * A refused request whose body was never read (#24). Closing a socket
+ * with unread bytes in it makes the kernel send RST, and an RST throws
+ * away the response the client has not read yet -- so a client that
+ * was still uploading never learns it got a 401. Instead the server
+ * half-closes and reads the rest of the body into nothing, until the
+ * body is done, the client closes, or one of these runs out.
+ *
+ * Modest on purpose: this is work done for a caller the server has
+ * just refused. A body larger than DRAIN_MAX_BYTES still loses its
+ * answer, unless the client asked with Expect: 100-continue, in which
+ * case it never sent the body at all.
+ */
+#define DRAIN_MAX_BYTES (4 * 1024 * 1024)
+#define DRAIN_MS 5000
+
+/*
  * The daemon sets no timeout of any kind on an artifact fetch: not
  * --max-time, not --connect-timeout, and no retry. A response that
  * stalls forever therefore does not fail on the host, it wedges that
@@ -89,7 +105,9 @@ enum conn_state {
 	CONN_RECV_BODY,
 	CONN_HASHING,
 	CONN_SEND_HEADER,
-	CONN_SEND_BODY
+	CONN_SEND_BODY,
+	CONN_SEND_CONTINUE, /* the interim "100 Continue", then back to CONN_RECV_BODY */
+	CONN_DRAIN          /* response sent; discarding a body nobody will read (#24) */
 };
 
 struct conn {
@@ -130,6 +148,17 @@ struct conn {
 
 	/* The events this fd is registered for, as epoll_set() last left it. */
 	unsigned armed;
+
+	/*
+	 * Request body bytes the client declared and the server has not
+	 * read. Zero for a request with no body, or once the body is in.
+	 * Nonzero when a response is complete means the body was refused
+	 * unread, and the connection drains instead of closing (#24).
+	 */
+	long long body_unread;
+	long long drained;
+	long long drain_until_ms;
+	size_t cont_off;
 
 	/*
 	 * HTTPS. A listener serves TLS when tls_listener is set; a client
@@ -608,6 +637,41 @@ static void serve_artifact(struct conn *cc, const struct http_request *req, cons
 
 /* ---- push ---- */
 
+/*
+ * Whether name may be published as digest: 0, or the refusal is sent
+ * and -1 returned. Asked twice per push, from the one place. Before the
+ * body, against the digest the client declared, so a conflicting push
+ * of any size is refused without the bytes being sent (#24). After it,
+ * against the digest the bytes actually have, before they are adopted
+ * (#7). A body that matches its declaration gets the same answer both
+ * times, and one that does not is refused either way.
+ */
+static int refuse_if_taken(struct conn *cc, const char *name, const char *digest)
+{
+	char existing[STORE_SHA256_MAX];
+	enum store_error r = store_resolve(name, existing, sizeof(existing));
+
+	if (r == STORE_ERR_NOT_FOUND || (r == STORE_OK && strcmp(existing, digest) == 0))
+		return 0;
+	if (cc->up_path[0] != '\0') {
+		unlink(cc->up_path);
+		cc->up_path[0] = '\0';
+	}
+	if (r == STORE_OK) {
+		server_log("warn", "push %s refused: published as %s, pushed %s", name, existing,
+		           digest);
+		respond_error(cc, 409, "already published with a different sha256");
+		return -1;
+	}
+	/*
+	 * Ambiguous is a refusal, not a server fault: the name matches
+	 * artifacts for more than one machine, and which of them this push
+	 * meant is a question only the pusher can answer.
+	 */
+	respond_error(cc, r == STORE_ERR_AMBIGUOUS ? 409 : 500, store_error_str(r));
+	return -1;
+}
+
 static void finish_upload(struct conn *cc)
 {
 	char digest[STORE_SHA256_MAX];
@@ -670,31 +734,8 @@ static void finish_upload(struct conn *cc)
 	 * store_publish() still makes the authoritative decision. All this
 	 * settles is whether the temp file becomes a blob or is discarded.
 	 */
-	{
-		char existing[STORE_SHA256_MAX];
-		enum store_error r = store_resolve(cc->up_name, existing, sizeof(existing));
-
-		if (r == STORE_OK && strcmp(existing, digest) != 0) {
-			unlink(cc->up_path);
-			cc->up_path[0] = '\0';
-			server_log("warn", "push %s refused: published as %s, pushed %s", cc->up_name,
-			           existing, digest);
-			respond_error(cc, 409, "already published with a different sha256");
-			return;
-		}
-		if (r != STORE_OK && r != STORE_ERR_NOT_FOUND) {
-			unlink(cc->up_path);
-			cc->up_path[0] = '\0';
-			/*
-			 * Ambiguous is a refusal, not a server fault: the name
-			 * matches artifacts for more than one machine, and which
-			 * of them this push meant is a question only the pusher
-			 * can answer.
-			 */
-			respond_error(cc, r == STORE_ERR_AMBIGUOUS ? 409 : 500, store_error_str(r));
-			return;
-		}
-	}
+	if (refuse_if_taken(cc, cc->up_name, digest) != 0)
+		return;
 
 	e = store_blob_adopt(cc->up_path, digest);
 	cc->up_path[0] = '\0'; /* adopted or unlinked -- either way not ours now */
@@ -787,6 +828,16 @@ static void start_hash_child(struct conn *cc)
 	}
 }
 
+/* True when the request carries "Expect: 100-continue". */
+static int wants_continue(const struct http_request *req)
+{
+	char v[64];
+
+	if (http_find_header(req->headers, req->headers_len, "Expect", v, sizeof(v)) < 0)
+		return 0;
+	return strcasecmp(v, "100-continue") == 0;
+}
+
 static void begin_upload(struct conn *cc, const struct http_request *req, const char *name)
 {
 	char digest[STORE_SHA256_MAX + 8];
@@ -862,6 +913,9 @@ static void begin_upload(struct conn *cc, const struct http_request *req, const 
 		}
 	}
 
+	if (refuse_if_taken(cc, name, digest) != 0)
+		return;
+
 	snprintf(cc->up_digest, sizeof(cc->up_digest), "%s", digest);
 	snprintf(cc->up_name, sizeof(cc->up_name), "%s", name);
 	cc->up_expect = req->content_length;
@@ -877,6 +931,21 @@ static void begin_upload(struct conn *cc, const struct http_request *req, const 
 		return;
 	}
 	cc->state = CONN_RECV_BODY;
+	/*
+	 * Every reason to refuse this push has been checked, so a client
+	 * that asked may now send the body. curl asks by itself for bodies
+	 * over 1 MB, and until this was answered it waited a second for
+	 * nothing on every large publish. Not sent once body bytes have
+	 * arrived: the client has stopped waiting, and RFC 9110 lets a
+	 * server omit it then.
+	 */
+	if (req->body_len == 0 && wants_continue(req)) {
+		cc->state = CONN_SEND_CONTINUE;
+		cc->cont_off = 0;
+		cc->last_ms = now_ms();
+		epoll_set(cc, EPOLLOUT);
+		return;
+	}
 	/* Body bytes that rode in with the headers are already buffered. */
 	if (req->body_len > 0) {
 		if (write(cc->up_fd, req->body, req->body_len) != (ssize_t)req->body_len) {
@@ -1734,6 +1803,9 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 	 */
 	cc->head_only = 0;
 	cc->note[0] = '\0';
+	cc->body_unread = req->content_length > (long)req->body_len
+	                          ? (long long)req->content_length - (long long)req->body_len
+	                          : 0;
 	snprintf(path, sizeof(path), "%s", req->path);
 	q = strchr(path, '?');
 	if (q != NULL)
@@ -1959,10 +2031,77 @@ static ssize_t tls_send_blob(struct conn *cc)
 	return n;
 }
 
+/*
+ * CONN_DRAIN: read and discard. Never staged, never parsed -- these
+ * bytes are the tail of a request that has already been answered, and
+ * fed to the parser they would be answered again as a second request.
+ */
+static void handle_drain(struct conn *cc)
+{
+	char buf[READ_BUF];
+
+	for (;;) {
+		ssize_t n;
+
+		if (cc->body_unread <= 0 || cc->drained >= DRAIN_MAX_BYTES ||
+		    now_ms() >= cc->drain_until_ms) {
+			conn_close(cc);
+			return;
+		}
+		n = conn_recv(cc, buf, sizeof(buf));
+		if (n < 0) {
+			if (errno == EAGAIN || errno == EWOULDBLOCK)
+				return;
+			if (errno == EINTR)
+				continue;
+			conn_close(cc);
+			return;
+		}
+		if (n == 0) {
+			conn_close(cc);
+			return;
+		}
+		cc->body_unread -= n;
+		cc->drained += n;
+	}
+}
+
+/*
+ * A response is fully sent. With no body left unread that is the end
+ * of the connection, as it always was. With one -- a push refused
+ * before its body was read -- half-close instead, so the client reads
+ * the answer and the end of the stream, and drain what it is still
+ * sending (#24).
+ */
+static void conn_done(struct conn *cc)
+{
+	if (cc->body_unread <= 0) {
+		conn_close(cc);
+		return;
+	}
+	if (cc->blob_fd >= 0) {
+		close(cc->blob_fd);
+		cc->blob_fd = -1;
+	}
+	if (cc->ssl != NULL)
+		tls_close_notify(cc->ssl);
+	shutdown(cc->fd, SHUT_WR);
+	cc->state = CONN_DRAIN;
+	cc->drained = 0;
+	cc->drain_until_ms = now_ms() + DRAIN_MS;
+	cc->last_ms = now_ms();
+	if (epoll_set(cc, EPOLLIN) != 0)
+		conn_close(cc);
+}
+
 static void handle_read(struct conn *cc)
 {
 	char buf[READ_BUF];
 
+	if (cc->state == CONN_DRAIN) {
+		handle_drain(cc);
+		return;
+	}
 	for (;;) {
 		struct http_request req;
 		ssize_t n;
@@ -1994,6 +2133,7 @@ static void handle_read(struct conn *cc)
 				return;
 			}
 			cc->up_received += (long)take;
+			cc->body_unread -= (long long)take;
 			if (cc->up_received >= cc->up_expect) {
 				start_hash_child(cc);
 				return;
@@ -2019,7 +2159,29 @@ static void handle_read(struct conn *cc)
 
 static void handle_write(struct conn *cc)
 {
+	static const char cont[] = "HTTP/1.1 100 Continue\r\n\r\n";
+
 	for (;;) {
+		if (cc->state == CONN_SEND_CONTINUE) {
+			ssize_t n = conn_send(cc, cont + cc->cont_off, sizeof(cont) - 1 - cc->cont_off);
+
+			if (n < 0) {
+				if (errno == EAGAIN || errno == EWOULDBLOCK)
+					return;
+				if (errno == EINTR)
+					continue;
+				conn_close(cc);
+				return;
+			}
+			cc->cont_off += (size_t)n;
+			cc->last_ms = now_ms();
+			if (cc->cont_off < sizeof(cont) - 1)
+				continue;
+			cc->state = CONN_RECV_BODY;
+			if (epoll_set(cc, EPOLLIN) != 0)
+				conn_close(cc);
+			return;
+		}
 		if (cc->state == CONN_SEND_HEADER) {
 			ssize_t n = conn_send(cc, cc->hdr + cc->hdr_off, cc->hdr_len - cc->hdr_off);
 
@@ -2036,7 +2198,7 @@ static void handle_write(struct conn *cc)
 			if (cc->hdr_off < cc->hdr_len)
 				continue;
 			if (cc->head_only || (cc->blob_fd < 0 && cc->out_buf == NULL)) {
-				conn_close(cc);
+				conn_done(cc);
 				return;
 			}
 			cc->state = CONN_SEND_BODY;
@@ -2074,7 +2236,7 @@ static void handle_write(struct conn *cc)
 			g_served_bytes += (long long)n;
 			cc->last_ms = now_ms();
 			if (cc->body_off >= cc->body_len) {
-				conn_close(cc);
+				conn_done(cc);
 				return;
 			}
 			continue;
@@ -2094,7 +2256,7 @@ static void handle_write(struct conn *cc)
 			g_served_bytes += (long long)n;
 			cc->last_ms = now_ms();
 			if (cc->out_off >= cc->out_len) {
-				conn_close(cc);
+				conn_done(cc);
 				return;
 			}
 			continue;
@@ -2142,12 +2304,14 @@ static void accept_loop(struct conn *listener)
 
 static int conn_reading(const struct conn *cc)
 {
-	return cc->state == CONN_READ_REQUEST || cc->state == CONN_RECV_BODY;
+	return cc->state == CONN_READ_REQUEST || cc->state == CONN_RECV_BODY ||
+	       cc->state == CONN_DRAIN;
 }
 
 static int conn_writing(const struct conn *cc)
 {
-	return cc->state == CONN_SEND_HEADER || cc->state == CONN_SEND_BODY;
+	return cc->state == CONN_SEND_HEADER || cc->state == CONN_SEND_BODY ||
+	       cc->state == CONN_SEND_CONTINUE;
 }
 
 /*
@@ -2222,7 +2386,11 @@ static void sweep_timeouts(void)
 		struct conn *next = cc->next;
 		long long idle = now - cc->last_ms;
 
-		if (cc->kind == CONN_CLIENT) {
+		if (cc->kind == CONN_CLIENT && cc->state == CONN_DRAIN) {
+			/* An absolute deadline: a client trickling bytes must not hold it open. */
+			if (now >= cc->drain_until_ms)
+				conn_close(cc);
+		} else if (cc->kind == CONN_CLIENT) {
 			long long limit = (cc->state == CONN_SEND_BODY || cc->state == CONN_RECV_BODY ||
 			                   cc->state == CONN_HASHING)
 			                          ? XFER_TIMEOUT_MS

@@ -17,6 +17,7 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #include <openssl/err.h>
@@ -298,9 +299,17 @@ ssize_t cix_conn_read(struct cix_conn *k, void *buf, size_t n)
 			r = SSL_read(k->ssl, buf, len);
 			if (r > 0)
 				return r;
-			if (SSL_get_error(k->ssl, (int)r) == SSL_ERROR_ZERO_RETURN) {
+			switch (SSL_get_error(k->ssl, (int)r)) {
+			case SSL_ERROR_ZERO_RETURN:
 				ERR_clear_error();
 				return 0;
+			case SSL_ERROR_WANT_READ:
+				/* Only under SO_RCVTIMEO: cix_conn_read_timeout() ran out. */
+				ERR_clear_error();
+				errno = EAGAIN;
+				return -1;
+			default:
+				break;
 			}
 			ERR_clear_error();
 			set_error("connection failed while receiving");
@@ -309,10 +318,34 @@ ssize_t cix_conn_read(struct cix_conn *k, void *buf, size_t n)
 		r = read(k->fd, buf, n);
 		if (r < 0 && errno == EINTR)
 			continue;
-		if (r < 0)
+		if (r < 0 && errno != EAGAIN && errno != EWOULDBLOCK)
 			set_error("receiving: %s", strerror(errno));
 		return r;
 	}
+}
+
+/*
+ * A receive timeout rather than poll(): under TLS the socket can be
+ * readable with nothing for the application -- a session ticket, say --
+ * and a blocking SSL_read() would then wait for a reply that an older
+ * server is never going to send.
+ */
+ssize_t cix_conn_read_timeout(struct cix_conn *k, void *buf, size_t n, int timeout_ms)
+{
+	struct timeval tv;
+	struct timeval none = { 0, 0 };
+	ssize_t r;
+	int saved;
+
+	tv.tv_sec = timeout_ms / 1000;
+	tv.tv_usec = (timeout_ms % 1000) * 1000;
+	if (setsockopt(k->fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0)
+		return -1;
+	r = cix_conn_read(k, buf, n);
+	saved = errno;
+	setsockopt(k->fd, SOL_SOCKET, SO_RCVTIMEO, &none, sizeof(none));
+	errno = saved;
+	return r;
 }
 
 void cix_conn_close(struct cix_conn *k)

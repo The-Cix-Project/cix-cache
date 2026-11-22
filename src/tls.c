@@ -125,6 +125,13 @@ void tls_session_free(struct ssl_st *s)
 	SSL_free(s);
 }
 
+void tls_close_notify(struct ssl_st *s)
+{
+	if (SSL_is_init_finished(s))
+		SSL_shutdown(s);
+	ERR_clear_error();
+}
+
 /* Maps an SSL_read/SSL_write result onto the read()/write() contract. */
 static ssize_t result(SSL *s, int rc, unsigned *want, int reading)
 {

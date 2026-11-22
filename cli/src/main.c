@@ -450,6 +450,56 @@ static void fmt_removed(const struct json_value *v)
 	fprintf(g_out, "removed\n");
 }
 
+/* How long publish waits for "100 Continue" before sending the body anyway. */
+#define CONTINUE_WAIT_MS 1000
+
+struct resp_buf {
+	char b[8192];
+	size_t len;
+};
+
+/*
+ * The next final status from k, skipping any 1xx interim response, or
+ * 0 if none arrived. A 100 that turns up late, after the wait ran out
+ * and the body went anyway, is skipped too, not reported as the result.
+ * timeout_ms < 0 waits for the end of the response; otherwise this
+ * stops at the first complete status line, interim or final. Returns
+ * 100 for an interim response.
+ */
+static int read_status(struct cix_conn *k, struct resp_buf *rb, int timeout_ms)
+{
+	for (;;) {
+		char *end;
+		ssize_t n;
+
+		rb->b[rb->len] = '\0';
+		end = strstr(rb->b, "\r\n\r\n");
+		if (end != NULL) {
+			int status;
+			size_t block = (size_t)(end + 4 - rb->b);
+
+			if (sscanf(rb->b, "HTTP/1.%*d %d", &status) != 1)
+				return 0;
+			if (status >= 200)
+				return status;
+			memmove(rb->b, rb->b + block, rb->len - block);
+			rb->len -= block;
+			if (timeout_ms >= 0)
+				return status;
+			continue;
+		}
+		if (rb->len >= sizeof(rb->b) - 1)
+			return 0;
+		if (timeout_ms >= 0)
+			n = cix_conn_read_timeout(k, rb->b + rb->len, sizeof(rb->b) - 1 - rb->len, timeout_ms);
+		else
+			n = cix_conn_read(k, rb->b + rb->len, sizeof(rb->b) - 1 - rb->len);
+		if (n <= 0)
+			return 0;
+		rb->len += (size_t)n;
+	}
+}
+
 /*
  * PUT is the one subcommand that cannot go through
  * cix_client_request_with_auth(): that takes the body as a
@@ -470,6 +520,7 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 	struct stat st;
 	long long sent = 0;
 	struct cix_conn *k;
+	struct resp_buf rb;
 	int fd;
 	int status = 0;
 	int i;
@@ -508,6 +559,7 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 		return 1;
 	}
 	snprintf(url, sizeof(url), "/%s", name);
+	rb.len = 0;
 	k = cix_conn_open(c);
 	if (k == NULL) {
 		close(fd);
@@ -516,13 +568,31 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 	}
 	snprintf(req, sizeof(req),
 	         "PUT %s HTTP/1.1\r\nHost: %s\r\nContent-Length: %lld\r\n"
-	         "X-Cix-Sha256: %s\r\n%s%s%sConnection: close\r\n\r\n",
+	         "X-Cix-Sha256: %s\r\n%s%s%sExpect: 100-continue\r\nConnection: close\r\n\r\n",
 	         url, c->host, (long long)st.st_size, digest, token != NULL ? "Authorization: Bearer " : "",
 	         token != NULL ? token : "", token != NULL ? "\r\n" : "");
 	if (cix_conn_write_all(k, req, strlen(req)) != 0) {
 		close(fd);
 		cix_conn_close(k);
 		fprintf(stderr, "cixcachectl: sending the request: %s\n", cix_client_last_error());
+		return 1;
+	}
+	/*
+	 * Expect: 100-continue (#24). The server checks the token, the name
+	 * and the signature rule before a byte of the body is sent, and
+	 * answers "100 Continue" or its refusal. A refusal is then read
+	 * cleanly, however large the file, over HTTPS too -- where a body
+	 * the server stopped reading used to take the answer down with the
+	 * session.
+	 *
+	 * A server from before #24 never answers, so after a second the
+	 * body goes anyway, which is what curl does.
+	 */
+	status = read_status(k, &rb, CONTINUE_WAIT_MS);
+	if (status >= 200) {
+		close(fd);
+		cix_conn_close(k);
+		fprintf(stderr, "cixcachectl: push rejected (HTTP %d)\n", status);
 		return 1;
 	}
 	for (;;) {
@@ -537,49 +607,33 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 			break;
 		if (cix_conn_write_all(k, buf, (size_t)n) != 0) {
 			/*
-			 * Usually the server answering early -- a 403 from a
-			 * read-only port, a 401, a 409 -- and closing. Its reply is
-			 * still readable and says more than "closed" does.
+			 * The server answered and closed without reading the rest:
+			 * an old server that does not answer Expect, refusing.
+			 * Over plain HTTP its answer is still readable below.
 			 */
 			break;
 		}
 		sent += n;
 	}
 	close(fd);
-	{
-		char resp[4096];
-		ssize_t n = cix_conn_read(k, resp, sizeof(resp) - 1);
-
-		if (n > 0) {
-			resp[n] = '\0';
-			if (sscanf(resp, "HTTP/1.%*d %d", &status) != 1)
-				status = 0;
-		}
-	}
+	status = read_status(k, &rb, -1);
 	cix_conn_close(k);
 	if (status >= 200 && status < 300 && sent == (long long)st.st_size) {
 		printf("published %s (%lld bytes)\n", name, sent);
 		return 0;
 	}
-	/*
-	 * The server stopped reading partway through: it refused the
-	 * publish before taking the body -- a wrong token, a read-only
-	 * port, a conflicting name -- and closed. Over plain HTTP its
-	 * answer is still readable, and was reported above. Over HTTPS a
-	 * failed write ends the session, so the answer is lost with it;
-	 * say what is known rather than "no answer".
-	 */
-	if (status == 0 && sent < (long long)st.st_size)
+	if (status > 0)
+		fprintf(stderr, "cixcachectl: push rejected (HTTP %d)\n", status);
+	else if (sent < (long long)st.st_size)
+		/* Only a server that ignores Expect gets here: over HTTPS its answer went with the session. */
 		fprintf(stderr,
 		        "cixcachectl: the server refused the publish after %lld of %lld bytes, and "
 		        "closed before its reason could be read (check --token, and that this is not a "
 		        "read-only port; the server's log has the status)\n",
 		        sent, (long long)st.st_size);
-	else if (status == 0)
+	else
 		fprintf(stderr, "cixcachectl: no answer after %lld bytes: %s\n", sent,
 		        cix_client_last_error());
-	else
-		fprintf(stderr, "cixcachectl: push rejected (HTTP %d)\n", status);
 	return 1;
 }
 

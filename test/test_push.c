@@ -1,10 +1,15 @@
 /*
  * Push tests: authentication, the declared-digest check, idempotence,
  * and the immutability conflict that protects a recipe version from
- * having its bytes changed underneath it.
+ * having its bytes changed underneath it. And how a push the server
+ * refuses ends (#24): with an answer the client can read, never with a
+ * reset that throws it away.
  */
 #include "testserver.h"
 
+#include <arpa/inet.h>
+#include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +26,146 @@ static int g_failures;
 
 #define PORT 7802
 #define TOKEN "pushtoken"
+
+/* A raw connection to the test server, for what curl will not show. */
+static int raw_connect(int port)
+{
+	struct sockaddr_in a;
+	int fd = socket(AF_INET, SOCK_STREAM, 0);
+
+	if (fd < 0)
+		return -1;
+	memset(&a, 0, sizeof(a));
+	a.sin_family = AF_INET;
+	a.sin_port = htons((unsigned short)port);
+	a.sin_addr.s_addr = htonl(0x7f000001);
+	if (connect(fd, (struct sockaddr *)&a, sizeof(a)) != 0) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+/* The status of the next response on fd within timeout_ms, or 0. */
+static int raw_status(int fd, int timeout_ms)
+{
+	struct pollfd p;
+	char buf[512];
+	ssize_t n;
+	int status = 0;
+
+	p.fd = fd;
+	p.events = POLLIN;
+	if (poll(&p, 1, timeout_ms) != 1)
+		return 0;
+	n = read(fd, buf, sizeof(buf) - 1);
+	if (n <= 0)
+		return 0;
+	buf[n] = '\0';
+	if (sscanf(buf, "HTTP/1.%*d %d", &status) != 1)
+		return 0;
+	return status;
+}
+
+static void raw_put_header(int fd, const char *name, long long len, const char *digest,
+                           const char *token, int expect)
+{
+	char hdr[700];
+
+	snprintf(hdr, sizeof(hdr),
+	         "PUT /%s HTTP/1.1\r\nHost: x\r\nContent-Length: %lld\r\nX-Cix-Sha256: %s\r\n"
+	         "Authorization: Bearer %s\r\n%s\r\n",
+	         name, len, digest, token, expect ? "Expect: 100-continue\r\n" : "");
+	if (write(fd, hdr, strlen(hdr)) != (ssize_t)strlen(hdr))
+		fprintf(stderr, "warning: short header write\n");
+}
+
+/*
+ * #24. A push refused before its body is read used to be closed with
+ * that body still unread, which makes the kernel answer with RST, and
+ * an RST discards whatever response the client has not read yet. curl,
+ * still uploading, saw no status at all about one time in 25.
+ *
+ * The flake that caused was timing, so it is not tested by repeating
+ * it. What changed is deterministic: after answering, the server
+ * half-closes and keeps reading, so the client can still send, and
+ * then reads a clean end of stream. Before, that next write failed
+ * with EPIPE or ECONNRESET every time.
+ */
+static void test_refusal_is_not_a_reset(void)
+{
+	static char chunk[65536];
+	char zeros[65];
+	char buf[256];
+	ssize_t w;
+	ssize_t n;
+	int fd;
+
+	memset(chunk, 'x', sizeof(chunk));
+	memset(zeros, '0', 64);
+	zeros[64] = '\0';
+	fd = raw_connect(PORT);
+	CHECK(fd >= 0, "connect for the refused-upload check");
+	if (fd < 0)
+		return;
+	raw_put_header(fd, "r-1.0-1-x86_64.cixpkg", 1000000, zeros, "wrong", 0);
+	if (write(fd, chunk, sizeof(chunk)) != (ssize_t)sizeof(chunk))
+		fprintf(stderr, "warning: short body write\n");
+	CHECK(raw_status(fd, 2000) == 401, "a refused upload is answered");
+	usleep(100000);
+	w = write(fd, chunk, sizeof(chunk));
+	CHECK(w > 0, "and the connection is half-closed, not reset: the client may finish sending");
+	/* The rest of the response -- headers and body are separate writes -- then the end. */
+	do
+		n = read(fd, buf, sizeof(buf));
+	while (n > 0);
+	CHECK(n == 0, "and then reads a clean end of stream, not a reset");
+	close(fd);
+}
+
+/*
+ * Expect: 100-continue. curl sends it by itself for bodies over 1 MB,
+ * and waited a second for nothing on every large publish until it was
+ * answered. A push that will be refused is refused before the body,
+ * which is what lets a client hear a 401 for a file of any size.
+ */
+static void test_expect_continue(const char *path, const char *digest, long long len)
+{
+	static char buf[65536];
+	FILE *f;
+	size_t n;
+	int fd;
+
+	fd = raw_connect(PORT);
+	CHECK(fd >= 0, "connect for the 100-continue check");
+	if (fd < 0)
+		return;
+	raw_put_header(fd, "e-1.0-1-x86_64.cixpkg", len, digest, TOKEN, 1);
+	CHECK(raw_status(fd, 500) == 100, "a push that will be accepted is answered 100 Continue");
+	f = fopen(path, "rb");
+	while (f != NULL && (n = fread(buf, 1, sizeof(buf), f)) > 0)
+		if (write(fd, buf, n) != (ssize_t)n)
+			break;
+	if (f != NULL)
+		fclose(f);
+	CHECK(raw_status(fd, 5000) == 201, "and then publishes as usual");
+	close(fd);
+
+	fd = raw_connect(PORT);
+	if (fd < 0)
+		return;
+	raw_put_header(fd, "e2-1.0-1-x86_64.cixpkg", len, digest, "wrong", 1);
+	CHECK(raw_status(fd, 500) == 401,
+	      "a push that will be refused is refused before the body, not answered 100");
+	close(fd);
+
+	fd = raw_connect(PORT);
+	if (fd < 0)
+		return;
+	raw_put_header(fd, "e-1.0-1-x86_64.cixpkg", len, "1111111111111111111111111111111111111111111111111111111111111111", TOKEN, 1);
+	CHECK(raw_status(fd, 500) == 409, "a name already holding other bytes is refused before the body");
+	close(fd);
+}
 
 static int put(struct testserver *ts, const char *src, const char *name, const char *digest,
                const char *token)
@@ -249,6 +394,9 @@ int main(void)
 	CHECK(ts_status(PORT, "DELETE", "/p-1.0.tar.gz", TOKEN) == 204, "delete unpublishes");
 	CHECK(ts_status(PORT, "GET", "/p-1.0.tar.gz", NULL) == 404, "deleted name is gone");
 	CHECK(ts_status(PORT, "DELETE", "/p-1.0.tar.gz", TOKEN) == 404, "deleting twice is a miss");
+
+	test_refusal_is_not_a_reset();
+	test_expect_continue(a_path, a_digest, 200000);
 
 	ts_stop(&ts);
 	if (g_failures == 0)
