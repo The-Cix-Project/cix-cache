@@ -13,11 +13,15 @@
  *   - nothing below TLS 1.2 is accepted;
  *   - SIGHUP swaps the certificate, and a reload that fails keeps the
  *     old one in service;
- *   - a configuration that cannot serve what it asks for does not start.
+ *   - a configuration that cannot serve what it asks for does not start;
+ *   - `cix cache` reaches it by name over HTTPS, verifies the certificate
+ *     against --ca-file or CIX_CACHE_CA_FILE, refuses one that does not
+ *     verify or does not name the host, and reports a refused publish.
  */
 #include "testserver.h"
 
 #include <errno.h>
+#include <time.h>
 
 #define PORT 7804
 #define TLS_PORT 7805
@@ -217,6 +221,101 @@ static void test_protocol_floor(void)
 	CHECK(https_status("GET", "/", NULL) == 200, "and the server carries on");
 }
 
+/* Runs build/cix-cache; returns its exit status, first output line in out. */
+static int cli(const char *env, const char *args, char *out, size_t out_size)
+{
+	char cmd[1600];
+	FILE *p;
+	int rc;
+
+	snprintf(cmd, sizeof(cmd), "%s build/cix-cache %s 2>&1", env != NULL ? env : "", args);
+	out[0] = '\0';
+	p = popen(cmd, "r");
+	if (p == NULL)
+		return -1;
+	if (fgets(out, (int)out_size, p) != NULL)
+		out[strcspn(out, "\r\n")] = '\0';
+	while (fgetc(p) != EOF)
+		;
+	rc = pclose(p);
+	return WIFEXITED(rc) ? WEXITSTATUS(rc) : -1;
+}
+
+static void test_cli(void)
+{
+	char server[200];
+	char args[1400];
+	char out[600];
+	char src[400];
+	char digest[128];
+	long long started;
+	struct timespec t0;
+	struct timespec t1;
+
+	snprintf(server, sizeof(server), "--server=https://localhost:%d --ca-file='%s'", TLS_PORT,
+	         g_crt);
+	snprintf(args, sizeof(args), "%s status", server);
+	CHECK(cli(NULL, args, out, sizeof(out)) == 0, "cix cache status over HTTPS, by name");
+
+	snprintf(src, sizeof(src), "%s/cli.src", g_dir);
+	ts_make_file(src, 3 * 1024 * 1024);
+	ts_sha256(src, digest, sizeof(digest));
+	snprintf(args, sizeof(args), "%s publish '%s' --name=cli-1.0-1-x86_64.cixpkg --sha256=%s "
+	                             "--token=%s",
+	         server, src, digest, TOKEN);
+	CHECK(cli(NULL, args, out, sizeof(out)) == 0 && strncmp(out, "published", 9) == 0,
+	      "cix cache publish streams 3 MB over HTTPS");
+
+	snprintf(args, sizeof(args), "--json %s list", server);
+	{
+		char cmd[1600];
+
+		snprintf(cmd, sizeof(cmd), "build/cix-cache %s | grep -c cli-1.0", args);
+		ts_capture(cmd, out, sizeof(out));
+		CHECK(atoi(out) >= 1, "and lists it back");
+	}
+
+	snprintf(args, sizeof(args), "--server=https://localhost:%d status", TLS_PORT);
+	{
+		char env[400];
+
+		snprintf(env, sizeof(env), "CIX_CACHE_CA_FILE='%s'", g_crt);
+		CHECK(cli(env, args, out, sizeof(out)) == 0, "CIX_CACHE_CA_FILE stands in for --ca-file");
+	}
+
+	/* Without the site CA: refused, said why, and not retried. */
+	clock_gettime(CLOCK_MONOTONIC, &t0);
+	CHECK(cli("CIX_CACHE_CA_FILE=", args, out, sizeof(out)) != 0,
+	      "a certificate the system store does not trust is refused");
+	clock_gettime(CLOCK_MONOTONIC, &t1);
+	started = (t1.tv_sec - t0.tv_sec) * 1000 + (t1.tv_nsec - t0.tv_nsec) / 1000000;
+	CHECK(strstr(out, "certificate not trusted") != NULL, "and the message says so");
+	CHECK(started < 400, "and is not retried as if the network had blinked");
+
+	/*
+	 * The certificate is for DNS:localhost. Reached by address it is
+	 * valid, trusted, and for some other name -- which is exactly what
+	 * the hostname check exists to refuse.
+	 */
+	snprintf(args, sizeof(args), "--server=https://127.0.0.1:%d --ca-file='%s' status", TLS_PORT,
+	         g_crt);
+	CHECK(cli(NULL, args, out, sizeof(out)) != 0,
+	      "a trusted certificate that does not name the host is refused");
+
+	snprintf(args, sizeof(args), "--host=127.0.0.1 --port=%d publish '%s' "
+	                             "--name=ro-1.0-1-x86_64.cixpkg --sha256=%s --token=%s",
+	         PORT, src, digest, TOKEN);
+	CHECK(cli(NULL, args, out, sizeof(out)) != 0 && strstr(out, "403") != NULL,
+	      "a publish to the read-only plain port reports the 403, mid-upload or not");
+
+	snprintf(args, sizeof(args), "--server=https://localhost:%d/x status", TLS_PORT);
+	CHECK(cli(NULL, args, out, sizeof(out)) == 2, "a server URL with a path is refused");
+	snprintf(args, sizeof(args), "--server=https://localhost:%d --port=1 status", TLS_PORT);
+	CHECK(cli(NULL, args, out, sizeof(out)) == 2, "and so are --server and --port together");
+	snprintf(args, sizeof(args), "--server=ftp://localhost status");
+	CHECK(cli(NULL, args, out, sizeof(out)) == 2, "and a scheme that is not http(s)");
+}
+
 static void test_reload(const struct testserver *ts)
 {
 	char new_crt[300];
@@ -323,6 +422,7 @@ int main(void)
 	test_https_round_trip();
 	test_plain_read_only();
 	test_protocol_floor();
+	test_cli();
 	test_reload(&ts);
 	ts_stop(&ts);
 

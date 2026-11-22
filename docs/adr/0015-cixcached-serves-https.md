@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted, 2026-11-22. Closes the server half of issue #23. Replaces the
+Accepted, 2026-11-22. Closes the cix-cache half of issue #23: the
+server, and `cix cache` as its client. Replaces the
 "no TLS here, by design" note `docs/DEPLOYMENT.md` carried; ADR-0002's
 invariant is unchanged.
 
@@ -121,6 +122,38 @@ plus encryption per byte. Plain connections keep `sendfile()`.
   base. A host must use a name in the certificate's SANs
   (`cache.uk.home.arpa`), not an IP address.
 
+## The client: `cix cache` owns its HTTP client now
+
+`cix cache` used a verbatim copy of the Cix repository's
+`client/src/httpclient.c`, whose rule was "fix upstream first". That
+copy took IPv4 literals only and spoke no TLS, so it could reach
+neither `cache.uk.home.arpa` nor any HTTPS port. The
+`--host=cache.cix.world --port=443` example in `DEPLOYMENT.md` had
+never worked. Upstream had neither feature and nothing in progress. The
+cix maintainer filed cix#726 on 2026-11-22 and had not started it. The
+owner chose to include the client in #23 rather than wait.
+
+So the copy is replaced, not edited, along with `include/iohelpers.h`,
+which only the copy used. The client resolves names with
+`getaddrinfo()`, takes `--server=http(s)://HOST[:PORT]`, and verifies
+like libcurl does for cixd:
+
+- the chain against `--ca-file`, then `$CIX_CACHE_CA_FILE`, then the
+  system store;
+- the name (with SNI) or the address against the certificate;
+- a TLS 1.2 floor.
+
+A certificate that does not verify is reported as such and not
+retried, because it will not verify next time either. The flag and
+variable names are the ones cix#726 proposes for cixctl, so the two
+tools agree if that lands. A response shorter than its Content-Length
+is an error, since a TLS client that reads to close has no other way
+to tell a cut-off body from a complete one.
+
+The cost is that cix-cache no longer shares a client with Cix. If
+cix#726 lands, copying it back is a choice to make then, not an
+obligation.
+
 ## Out of scope here
 
 The CPDL recipe, the container and its certificate, trusting the site CA
@@ -143,6 +176,18 @@ covers:
   one in service;
 - each refused configuration exiting instead of serving.
 
-Breaking the code on purpose shows the tests catch it: removing the
-read-only gate fails three checks, and discarding the unsent part of a
-partial write fails both byte-for-byte checks.
+- `cix cache` over HTTPS by name: status, a 3 MB publish, list,
+  `CIX_CACHE_CA_FILE`, a certificate the system store does not trust
+  refused without retrying, a trusted certificate that does not name
+  the host refused, and a publish to the read-only port reporting its
+  403.
+
+Breaking the code on purpose shows the tests catch it:
+
+- removing the read-only gate fails three checks;
+- discarding the unsent part of a partial write fails both
+  byte-for-byte checks;
+- removing the client's hostname check fails the check that a trusted
+  certificate must name the host;
+- letting SIGPIPE through fails the check that a refused publish
+  reports its 403.

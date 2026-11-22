@@ -321,8 +321,13 @@ minisign -Vm cix-installer-2.2.0-1-x86_64.iso -p cix.pub</code></pre>
 		<p class="note">Anything marked <span class="tag warn">POST</span> needs the push token.</p>
 
 		<h2 id="help-cli">Command line</h2>
-		<pre><code>cix cache [--host=H] [--port=N] [--json] &lt;command&gt;
+		<pre><code>cix cache [--server=URL | --host=H --port=N] [--ca-file=PEM] [--json] &lt;command&gt;
    or: cix-cache [...] &lt;command&gt;        (what cix dispatches to)
+
+  --server=https://cache.example:8443   the server, http:// or https://
+  --host=H --port=N                     plain HTTP to H:N (default 127.0.0.1:8080)
+  --ca-file=PEM                         CA bundle for https, e.g. a site CA;
+                                        default $CIX_CACHE_CA_FILE, else the system's
 
   status                     server and store summary
   list                       every published artifact, paged

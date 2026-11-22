@@ -14,6 +14,7 @@
 #include <errno.h>
 #include <time.h>
 #include <fcntl.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -451,10 +452,11 @@ static void fmt_removed(const struct json_value *v)
 
 /*
  * PUT is the one subcommand that cannot go through
- * cix_client_request(): that takes the body as a NUL-terminated string
- * held whole in memory, and an image artifact here is 2.7 GB. The
- * request is written by hand onto a raw socket and the file streamed
- * through a fixed buffer instead. Still exactly one HTTP call.
+ * cix_client_request_with_auth(): that takes the body as a
+ * NUL-terminated string held whole in memory, and an image artifact
+ * here is 2.7 GB. The request is written by hand onto one connection,
+ * plain or TLS alike, and the file streamed through a fixed buffer.
+ * Still exactly one HTTP call.
  */
 static int cmd_put(const struct cix_client *c, int argc, char **argv)
 {
@@ -464,11 +466,11 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 	const char *token = NULL;
 	const char *digest = NULL;
 	char url[600];
-	char req[1024];
+	char req[1600];
 	struct stat st;
 	long long sent = 0;
+	struct cix_conn *k;
 	int fd;
-	int sock;
 	int status = 0;
 	int i;
 
@@ -506,10 +508,10 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 		return 1;
 	}
 	snprintf(url, sizeof(url), "/%s", name);
-	sock = cix_client_connect_raw(c);
-	if (sock < 0) {
+	k = cix_conn_open(c);
+	if (k == NULL) {
 		close(fd);
-		fprintf(stderr, "cixcachectl: could not reach server\n");
+		fprintf(stderr, "cixcachectl: could not reach server: %s\n", cix_client_last_error());
 		return 1;
 	}
 	snprintf(req, sizeof(req),
@@ -517,15 +519,14 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 	         "X-Cix-Sha256: %s\r\n%s%s%sConnection: close\r\n\r\n",
 	         url, c->host, (long long)st.st_size, digest, token != NULL ? "Authorization: Bearer " : "",
 	         token != NULL ? token : "", token != NULL ? "\r\n" : "");
-	if (write(sock, req, strlen(req)) != (ssize_t)strlen(req)) {
+	if (cix_conn_write_all(k, req, strlen(req)) != 0) {
 		close(fd);
-		close(sock);
-		fprintf(stderr, "cixcachectl: short write sending request\n");
+		cix_conn_close(k);
+		fprintf(stderr, "cixcachectl: sending the request: %s\n", cix_client_last_error());
 		return 1;
 	}
 	for (;;) {
 		ssize_t n = read(fd, buf, sizeof(buf));
-		ssize_t off = 0;
 
 		if (n < 0) {
 			if (errno == EINTR)
@@ -534,25 +535,20 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 		}
 		if (n == 0)
 			break;
-		while (off < n) {
-			ssize_t w = write(sock, buf + off, (size_t)(n - off));
-
-			if (w < 0) {
-				if (errno == EINTR)
-					continue;
-				fprintf(stderr, "cixcachectl: connection closed after %lld bytes\n", sent);
-				close(fd);
-				close(sock);
-				return 1;
-			}
-			off += w;
-			sent += w;
+		if (cix_conn_write_all(k, buf, (size_t)n) != 0) {
+			/*
+			 * Usually the server answering early -- a 403 from a
+			 * read-only port, a 401, a 409 -- and closing. Its reply is
+			 * still readable and says more than "closed" does.
+			 */
+			break;
 		}
+		sent += n;
 	}
 	close(fd);
 	{
 		char resp[4096];
-		ssize_t n = read(sock, resp, sizeof(resp) - 1);
+		ssize_t n = cix_conn_read(k, resp, sizeof(resp) - 1);
 
 		if (n > 0) {
 			resp[n] = '\0';
@@ -560,12 +556,16 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 				status = 0;
 		}
 	}
-	close(sock);
-	if (status >= 200 && status < 300) {
+	cix_conn_close(k);
+	if (status >= 200 && status < 300 && sent == (long long)st.st_size) {
 		printf("published %s (%lld bytes)\n", name, sent);
 		return 0;
 	}
-	fprintf(stderr, "cixcachectl: push rejected (HTTP %d)\n", status);
+	if (status == 0)
+		fprintf(stderr, "cixcachectl: no answer after %lld of %lld bytes: %s\n", sent,
+		        (long long)st.st_size, cix_client_last_error());
+	else
+		fprintf(stderr, "cixcachectl: push rejected (HTTP %d)\n", status);
 	return 1;
 }
 
@@ -576,7 +576,7 @@ static int one_call(const struct cix_client *c, int json_mode, const char *metho
 	int rc;
 
 	if (cix_client_request_with_auth(c, method, path, token, NULL, &r) != 0) {
-		fprintf(stderr, "cixcachectl: could not reach server\n");
+		fprintf(stderr, "cixcachectl: could not reach server: %s\n", cix_client_last_error());
 		return 1;
 	}
 	out_open(paged && !json_mode);
@@ -601,7 +601,7 @@ static int cmd_log_follow(const struct cix_client *c, const char *token)
 
 		snprintf(path, sizeof(path), "/api/v1/log?after=%lld", after);
 		if (cix_client_request_with_auth(c, "GET", path, token, NULL, &r) != 0) {
-			fprintf(stderr, "cixcachectl: could not reach server\n");
+			fprintf(stderr, "cixcachectl: could not reach server: %s\n", cix_client_last_error());
 			return 1;
 		}
 		if (r.status < 200 || r.status >= 300) {
@@ -626,8 +626,13 @@ static int is_cmd(const char *cmd, const char *name, const char *alias)
 static void usage(FILE *out)
 {
 	fprintf(out,
-	        "usage: cix cache [--host=H] [--port=N] [--json] <command>\n"
+	        "usage: cix cache [--server=URL | --host=H --port=N] [--ca-file=PEM] [--json] <command>\n"
 	        "   or: cix-cache [...] <command>        (what cix dispatches to)\n"
+	        "\n"
+	        "  --server=https://cache.example:8443   the server, http:// or https://\n"
+	        "  --host=H --port=N                     plain HTTP to H:N (default 127.0.0.1:8080)\n"
+	        "  --ca-file=PEM                         CA bundle for https, e.g. a site CA;\n"
+	        "                                        default $CIX_CACHE_CA_FILE, else the system's\n"
 	        "\n"
 	        "  status                     server and store summary\n"
 	        "  list                       every published artifact\n"
@@ -724,19 +729,34 @@ static void note_old_name(const char *argv0)
 int main(int argc, char **argv)
 {
 	const char *host = DEFAULT_HOST;
+	const char *server = NULL;
+	const char *ca_file = getenv("CIX_CACHE_CA_FILE");
 	struct cix_client client;
 	int port = DEFAULT_PORT;
+	int host_or_port = 0;
 	int json_mode = 0;
 	const char *cmd;
 	int i = 1;
 
 	note_old_name(argv[0]);
+	/*
+	 * A server that refuses a publish answers before reading the body
+	 * and closes. The next write must fail with EPIPE so the answer can
+	 * be read and reported, not end the process with SIGPIPE.
+	 */
+	signal(SIGPIPE, SIG_IGN);
 
 	while (i < argc && strncmp(argv[i], "--", 2) == 0) {
-		if (strncmp(argv[i], "--host=", 7) == 0)
+		if (strncmp(argv[i], "--host=", 7) == 0) {
 			host = argv[i] + 7;
-		else if (strncmp(argv[i], "--port=", 7) == 0)
+			host_or_port = 1;
+		} else if (strncmp(argv[i], "--port=", 7) == 0) {
 			port = atoi(argv[i] + 7);
+			host_or_port = 1;
+		} else if (strncmp(argv[i], "--server=", 9) == 0)
+			server = argv[i] + 9;
+		else if (strncmp(argv[i], "--ca-file=", 10) == 0)
+			ca_file = argv[i] + 10;
 		else if (strcmp(argv[i], "--json") == 0)
 			json_mode = 1;
 		else if (strcmp(argv[i], "--help") == 0) {
@@ -747,7 +767,22 @@ int main(int argc, char **argv)
 		i++;
 	}
 	g_out = stdout;
-	cix_client_init(&client, host, port);
+	if (server != NULL) {
+		char err[300];
+
+		/* Two answers to "which server" would leave one silently ignored. */
+		if (host_or_port) {
+			fprintf(stderr, "cix cache: give --server, or --host/--port, not both\n");
+			return 2;
+		}
+		if (cix_client_parse_server(&client, server, err, sizeof(err)) != 0) {
+			fprintf(stderr, "cix cache: --server: %s\n", err);
+			return 2;
+		}
+	} else
+		cix_client_init(&client, host, port);
+	if (ca_file != NULL && ca_file[0] != '\0')
+		snprintf(client.ca_file, sizeof(client.ca_file), "%s", ca_file);
 	if (i >= argc) {
 		usage(stderr);
 		return 2;

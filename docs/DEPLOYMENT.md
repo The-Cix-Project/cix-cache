@@ -235,7 +235,7 @@ nothing until something publishes to it:
 
 ```
 sudo grep push_token /opt/cixcache/etc/cixcache.conf
-cix cache --host=cache.cix.world --port=443 publish FILE \
+cix cache --server=https://cache.cix.world publish FILE \
   --name=NAME --sha256=HEX --token=<push_token>
 ```
 
@@ -328,8 +328,21 @@ that issued it. `tools/seed.sh` copies into an HTTPS instance as it is,
 since it uses curl. Point `--to=` at the `https://` URL. To trust a site
 CA that is not in the system bundle, set `CURL_CA_BUNDLE`.
 
+`cix cache` reaches an HTTPS instance with `--server=`:
+
+```
+cix cache --server=https://cache.uk.home.arpa --ca-file=/path/to/site-ca.pem status
+export CIX_CACHE_CA_FILE=/path/to/site-ca.pem    # or once, for every command
+```
+
+It checks the certificate against the system's trusted CAs, or against
+`--ca-file` when given, and checks that the certificate names the host
+in the URL. A certificate that fails either check is refused, and the
+command says which check failed. Publishing to a read-only plain port
+reports the server's 403.
+
 Building needs OpenSSL's headers (`libssl-dev` on Debian). The daemon
-links `libssl` and `libcrypto` dynamically.
+and the CLI link `libssl` and `libcrypto` dynamically.
 
 ## Pointing a Cix host at it
 

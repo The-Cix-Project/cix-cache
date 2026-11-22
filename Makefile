@@ -20,7 +20,8 @@ CLIENT_CFLAGS := $(CFLAGS) -Iclient/include
 
 SERVER_SRCS := src/json.c src/http.c src/store.c src/manifest.c src/conf.c src/importer.c src/tls.c
 
-# HTTPS (ADR-0015). Dynamically linked, as cixd links it: a Cix image
+# HTTPS (ADR-0015), for the daemon and for `cix cache`. Dynamically
+# linked, as cixd links it: a Cix image
 # declares openssl as a runtime package. The code stays inside the
 # OpenSSL 3.0 API, which is what Cix containers ship.
 TLS_LIBS := -lssl -lcrypto
@@ -86,7 +87,7 @@ $(BUILD)/cixcached: src/main.c $(SERVER_SRCS) $(BUILD)/version.h | $(BUILD)
 	$(CC) $(CFLAGS) src/main.c $(SERVER_SRCS) -o $@ $(TLS_LIBS)
 
 $(BUILD)/cix-cache: cli/src/main.c $(CLIENT_SRCS) $(BUILD)/version.h | $(BUILD)
-	$(CC) $(CLIENT_CFLAGS) cli/src/main.c $(CLIENT_SRCS) -o $@
+	$(CC) $(CLIENT_CFLAGS) cli/src/main.c $(CLIENT_SRCS) -o $@ $(TLS_LIBS)
 
 # Depends on version.h: test_build_identity() asserts the daemon's own
 # build identity is a name this store would accept, which is a claim

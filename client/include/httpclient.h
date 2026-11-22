@@ -1,94 +1,95 @@
 /*
- * Vendored verbatim from the Cix repository, client/include/httpclient.h.
+ * The HTTP client `cix cache` talks to cixcached with.
  *
- * Copied rather than reimplemented so a resync stays a mechanical
- * diff against upstream. Do not edit here -- a local fix belongs
- * upstream first, or the two copies start meaning different things.
+ * This used to be a verbatim copy of the Cix repository's
+ * client/src/httpclient.c. That copy took IPv4 literals only and spoke
+ * no TLS, so it could not reach https://cache.uk.home.arpa (#23), and its
+ * rule was "fix upstream first". Upstream had neither and nothing in
+ * progress (cix#726, filed 2026-11-22), so cix-cache owns its client
+ * now. The flag and variable names follow what cix#726 proposes for
+ * cixctl, `--ca-file` and a *_CA_FILE variable, so the two tools agree
+ * if that lands.
+ *
+ * One request per connection, which is all cixcached serves.
  */
 #ifndef HTTPCLIENT_H
 #define HTTPCLIENT_H
 
 #include "json.h"
 
-/*
- * A small, reusable HTTP/1.1 client for talking to the Cix REST
- * daemon (docs/api/openapi.yaml) -- used by cixctl (cli/) and by
- * the daemon's own test suite (test/test_daemon.c), so there is one
- * implementation of "how to talk to the API," not two.
- */
+#include <stddef.h>
+#include <sys/types.h>
+
+#define CIX_CLIENT_HOST_MAX 256
+#define CIX_CLIENT_PATH_MAX 512
 
 struct cix_client {
-	char host[64];
+	char host[CIX_CLIENT_HOST_MAX]; /* a name or an address literal */
 	int port;
-	/* ADR-0144: an optional session token, attached automatically by
-	 * plain cix_client_request() (see cix_client_set_token() below) once
-	 * set -- 64 comfortably fits the daemon's own real 48-hex-char
-	 * token (HOSTAUTH_TOKEN_LEN, daemon/include/hostauth.h) without
-	 * this client-side header needing to depend on that daemon-only
-	 * one. Empty means "no session," identical to today's behavior. */
-	char token[64];
+	int tls;
+	/*
+	 * PEM CA bundle that verifies the server, for a site CA that is not
+	 * in the system store. Empty: the system's default trust store.
+	 */
+	char ca_file[CIX_CLIENT_PATH_MAX];
 };
 
 #define CIX_CONTENT_TYPE_MAX 64
 
 struct cix_response {
 	int status;
-	char content_type[CIX_CONTENT_TYPE_MAX]; /* empty string if no Content-Type header was present */
-	char *body;                             /* raw response body, NUL-terminated; NULL if empty */
+	char content_type[CIX_CONTENT_TYPE_MAX]; /* empty if the response had none */
+	char *body;                              /* NUL-terminated; NULL if empty */
 	size_t body_len;
-	struct json_value *json; /* NULL if the body was empty or not valid JSON (e.g. a 204) */
+	struct json_value *json; /* NULL if the body was empty or not JSON */
 };
 
+/* Plain HTTP to host:port. */
 void cix_client_init(struct cix_client *c, const char *host, int port);
 
 /*
- * ADR-0144: sets (or, with token == NULL/"", clears) the session token
- * every subsequent plain cix_client_request() call on c automatically
- * attaches as its own Authorization header -- callers that already
- * have a session (cixctl's own persisted-token load at startup, the
- * web dashboard's login flow) call this once instead of switching
- * every call site over to cix_client_request_with_auth() themselves.
+ * From a server URL: http://HOST[:PORT] or https://HOST[:PORT], with an
+ * optional trailing "/". The port defaults to 80 or 443. HOST may be a
+ * name, an IPv4 literal, or an IPv6 literal in brackets. Anything else,
+ * such as a path, a user or an unknown scheme, is refused rather than
+ * dropped. Returns 0, or -1 with the reason in err.
  */
-void cix_client_set_token(struct cix_client *c, const char *token);
+int cix_client_parse_server(struct cix_client *c, const char *url, char *err, size_t err_size);
 
 /*
- * Opens a raw, connected TCP socket to c's host/port -- the same
- * connect logic cix_client_request() uses internally, exposed for
- * callers that need the fd itself rather than one request/response
- * round trip (currently only client/src/console.c's WebSocket upgrade,
- * which cix_client_request() has no way to express: the connection
- * outlives a single response). Returns the fd, or -1 on failure.
+ * The reason the last failed call in this process failed, for a
+ * message the person running the command can act on, such as a
+ * certificate that does not verify. Empty if nothing has failed.
  */
-int cix_client_connect_raw(const struct cix_client *c);
+const char *cix_client_last_error(void);
 
 /*
- * Performs one request/response round trip: connects, sends method+
- * path+body (body may be NULL for no request body), reads the full
- * response (dynamically-sized -- no fixed cap on response size). On
- * transport failure (connect/write/read error, or a malformed status
- * line) returns -1 and *out is untouched. On success returns 0 and
- * fills *out; caller must cix_response_free() it.
+ * One connection, for a caller that streams its own request body;
+ * `cix cache publish` sends gigabytes and cannot hold them as a string.
+ * With TLS, the handshake and verification are done before this
+ * returns: the chain against ca_file or the system store, and the name
+ * or address against the certificate. Returns NULL on failure, with
+ * the reason in cix_client_last_error().
+ */
+struct cix_conn;
+
+struct cix_conn *cix_conn_open(const struct cix_client *c);
+int cix_conn_write_all(struct cix_conn *k, const void *buf, size_t n); /* 0, or -1 */
+ssize_t cix_conn_read(struct cix_conn *k, void *buf, size_t n);        /* >0, 0 at end, -1 */
+void cix_conn_close(struct cix_conn *k);
+
+/*
+ * One request and its whole response. body may be NULL; when given it
+ * is sent as application/json. token, when non-NULL and non-empty, is
+ * sent as "Authorization: Bearer". Returns 0 with *out filled (free it
+ * with cix_response_free()), whatever the HTTP status. Returns -1 for
+ * a transport failure, *out untouched.
  *
- * issue #20: internally retries a transport-level failure up to
- * CIX_CLIENT_MAX_ATTEMPTS times with a short fixed backoff before
- * finally giving up and returning -1 -- a single transient blip (the
- * daemon mid-restart, one dropped packet) no longer looks identical to
- * a genuinely down daemon on the very first attempt. Never retries
- * after a real HTTP response of any status -- an error status is a
- * real, deterministic answer, returned immediately, not retried.
- */
-int cix_client_request(const struct cix_client *c, const char *method, const char *path,
-                       const char *body, struct cix_response *out);
-
-/*
- * Same contract as cix_client_request() (including its retry behavior),
- * with a real "Authorization: Bearer <token>" header attached --
- * ADR-0144's own host-auth work (cixctl's own login/logout, and
- * every write command once a session is active, plus this daemon's
- * own test suite). token may be NULL (identical to a plain
- * cix_client_request() call in that case) -- callers that don't yet
- * have a session use this directly rather than needing two
- * near-duplicate call sites.
+ * A connection that fails is retried a few times with a short pause,
+ * because a daemon mid-restart is not a daemon that is down. A
+ * certificate that does not verify is not retried, because it will
+ * not verify next time either. Neither is any HTTP response, including
+ * an error status.
  */
 int cix_client_request_with_auth(const struct cix_client *c, const char *method, const char *path,
                                  const char *token, const char *body, struct cix_response *out);
