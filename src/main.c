@@ -55,15 +55,32 @@
  * away the response the client has not read yet -- so a client that
  * was still uploading never learns it got a 401. Instead the server
  * half-closes and reads the rest of the body into nothing, until the
- * body is done, the client closes, or one of these runs out.
+ * body is done, the client closes, or a limit runs out.
  *
- * Modest on purpose: this is work done for a caller the server has
- * just refused. A body larger than DRAIN_MAX_BYTES still loses its
- * answer, unless the client asked with Expect: 100-continue, in which
- * case it never sent the body at all.
+ * The limits are time, not bytes, the way nginx's lingering close is
+ * (lingering_time 30s, lingering_timeout 5s), because a client that
+ * writes its whole request before reading anything only gets its
+ * answer if the server reads everything it sends. A byte cap -- 4 MiB
+ * until #26 -- turned every refused body larger than the cap into a
+ * reset for exactly those clients. Discarding is cheap: a read into a
+ * stack buffer, nothing staged or parsed. A body that takes longer
+ * than DRAIN_MS to send still loses its answer, unless the client
+ * asked with Expect: 100-continue and so never sent it.
+ *
+ * DRAIN_BUDGET bounds one wakeup, so a fast sender being drained
+ * cannot hold the single-threaded reactor. epoll is level-triggered
+ * here, so returning with bytes still queued is not a lost wakeup.
  */
-#define DRAIN_MAX_BYTES (4 * 1024 * 1024)
-#define DRAIN_MS 5000
+#define DRAIN_MS 30000
+#define DRAIN_IDLE_MS 5000
+#define DRAIN_BUDGET (1024 * 1024)
+
+/*
+ * body_unread when the length of what follows is not known: a chunked
+ * body, or a request refused before it could be parsed (#25). Drained
+ * until the client closes, within the same limits.
+ */
+#define BODY_UNKNOWN LLONG_MAX
 
 /*
  * The daemon sets no timeout of any kind on an artifact fetch: not
@@ -154,9 +171,9 @@ struct conn {
 	 * read. Zero for a request with no body, or once the body is in.
 	 * Nonzero when a response is complete means the body was refused
 	 * unread, and the connection drains instead of closing (#24).
+	 * BODY_UNKNOWN when nobody can say how much is left (#25).
 	 */
 	long long body_unread;
-	long long drained;
 	long long drain_until_ms;
 	size_t cont_off;
 
@@ -862,6 +879,15 @@ static void begin_upload(struct conn *cc, const struct http_request *req, const 
 	}
 	if ((long long)req->content_length > UPLOAD_MAX_BYTES) {
 		respond_error(cc, 413, "upload too large");
+		return;
+	}
+	/*
+	 * A length AND a transfer coding: the two disagree about where the
+	 * body ends, which is the shape request smuggling takes. Refused
+	 * like any upload without a usable length, and drained to the end.
+	 */
+	if (cc->body_unread == BODY_UNKNOWN) {
+		respond_error(cc, 411, "chunked uploads are not accepted; send Content-Length");
 		return;
 	}
 	if (http_find_header(req->headers, req->headers_len, "X-Cix-Sha256", digest, sizeof(digest)) <
@@ -1806,6 +1832,19 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 	cc->body_unread = req->content_length > (long)req->body_len
 	                          ? (long long)req->content_length - (long long)req->body_len
 	                          : 0;
+	/*
+	 * A chunked body has no Content-Length to count down. Nothing here
+	 * accepts one (an upload without a length is a 411), so all a
+	 * chunked request can be is refused, and its body drained to the
+	 * end of the stream (#25).
+	 */
+	{
+		char te[256];
+
+		if (http_find_header(req->headers, req->headers_len, "Transfer-Encoding", te,
+		                     sizeof(te)) >= 0)
+			cc->body_unread = BODY_UNKNOWN;
+	}
 	snprintf(path, sizeof(path), "%s", req->path);
 	q = strchr(path, '?');
 	if (q != NULL)
@@ -2039,15 +2078,23 @@ static ssize_t tls_send_blob(struct conn *cc)
 static void handle_drain(struct conn *cc)
 {
 	char buf[READ_BUF];
+	long long budget = DRAIN_BUDGET;
 
 	for (;;) {
 		ssize_t n;
 
-		if (cc->body_unread <= 0 || cc->drained >= DRAIN_MAX_BYTES ||
-		    now_ms() >= cc->drain_until_ms) {
+		if (cc->body_unread <= 0 || now_ms() >= cc->drain_until_ms) {
 			conn_close(cc);
 			return;
 		}
+		/*
+		 * Out of budget: let the other connections have the loop. A
+		 * TLS session holding decrypted bytes is the exception, since
+		 * epoll cannot see them -- at most one record, so finishing
+		 * it costs no fairness.
+		 */
+		if (budget <= 0 && (cc->ssl == NULL || !tls_pending(cc->ssl)))
+			return;
 		n = conn_recv(cc, buf, sizeof(buf));
 		if (n < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -2061,8 +2108,10 @@ static void handle_drain(struct conn *cc)
 			conn_close(cc);
 			return;
 		}
-		cc->body_unread -= n;
-		cc->drained += n;
+		if (cc->body_unread != BODY_UNKNOWN)
+			cc->body_unread -= n;
+		budget -= n;
+		cc->last_ms = now_ms();
 	}
 }
 
@@ -2087,7 +2136,6 @@ static void conn_done(struct conn *cc)
 		tls_close_notify(cc->ssl);
 	shutdown(cc->fd, SHUT_WR);
 	cc->state = CONN_DRAIN;
-	cc->drained = 0;
 	cc->drain_until_ms = now_ms() + DRAIN_MS;
 	cc->last_ms = now_ms();
 	if (epoll_set(cc, EPOLLIN) != 0)
@@ -2141,12 +2189,19 @@ static void handle_read(struct conn *cc)
 			continue;
 		}
 
+		/*
+		 * Refused before there is a request to read a length from, so
+		 * whatever the client is still sending is of unknown size, and
+		 * closing on it would reset the answer away (#25).
+		 */
 		if (http_conn_feed(&cc->http, buf, (size_t)n) != 0) {
+			cc->body_unread = BODY_UNKNOWN;
 			respond_error(cc, 413, "request headers too large");
 			return;
 		}
 		rc = http_conn_try_parse(&cc->http, &req);
 		if (rc < 0) {
+			cc->body_unread = BODY_UNKNOWN;
 			respond_error(cc, 400, "malformed request");
 			return;
 		}
@@ -2387,8 +2442,13 @@ static void sweep_timeouts(void)
 		long long idle = now - cc->last_ms;
 
 		if (cc->kind == CONN_CLIENT && cc->state == CONN_DRAIN) {
-			/* An absolute deadline: a client trickling bytes must not hold it open. */
-			if (now >= cc->drain_until_ms)
+			/*
+			 * An absolute deadline, so a client trickling bytes cannot
+			 * hold it open, and a short one for silence, so a client
+			 * that has stopped sending without closing does not wait
+			 * out the whole of it.
+			 */
+			if (now >= cc->drain_until_ms || idle > DRAIN_IDLE_MS)
 				conn_close(cc);
 		} else if (cc->kind == CONN_CLIENT) {
 			long long limit = (cc->state == CONN_SEND_BODY || cc->state == CONN_RECV_BODY ||

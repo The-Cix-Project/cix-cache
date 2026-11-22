@@ -11,7 +11,7 @@ reasoning incoherent.
 |---|---|---|
 | [0001](0001-content-addressed-artifact-store.md) | Content-addressed store: blobs keyed by digest, published names as symlinks | accepted |
 | [0002](0002-registry-is-a-cache-not-a-catalogue.md) | The registry is a cache, never a catalogue, and never a trust boundary | accepted |
-| [0003](0003-push-protocol-and-artifact-immutability.md) | Push protocol, and what a published name may mean | accepted, amended by #7 and #24 |
+| [0003](0003-push-protocol-and-artifact-immutability.md) | Push protocol, and what a published name may mean | accepted, amended by #7, #24, #25 and #26 |
 | [0004](0004-epoll-reactor-with-streamed-bodies.md) | epoll reactor with streamed bodies | accepted |
 | [0005](0005-a-miss-must-be-visible.md) | A miss must be visible | accepted |
 | [0006](0006-packages-are-the-only-tier.md) | Packages are the only tier | accepted; supersedes the image half of 0001–0003 |

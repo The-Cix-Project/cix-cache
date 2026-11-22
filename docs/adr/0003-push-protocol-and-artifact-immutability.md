@@ -156,13 +156,53 @@ Three changes:
   second, as curl does.
 - **A response that leaves a body unread half-closes.** The server
   sends close_notify under TLS and `shutdown(SHUT_WR)`, then reads and
-  discards the rest of the body until it ends, the client closes, 4 MiB
-  have been discarded, or 5 seconds have passed, whichever comes first.
-  That is an absolute deadline, so a client trickling bytes cannot hold
-  the connection open. The bytes are never staged and never parsed. A
-  client that ignores 100-continue and sends more than 4 MiB can still
-  lose the answer. That limit is deliberate: this is work done for a
-  caller the server has just refused.
+  discards the rest of the body until it ends or the client closes.
+  The bytes are never staged and never parsed. As first written, this
+  also stopped after 4 MiB or 5 seconds; #25 and #26 changed that (see
+  below).
+
+### Amendment: refusals of any size and length (#25, #26)
+
+#24 left two ways for a refusal to still end in a reset. Both affected
+a client that writes its whole request before reading anything, such as
+Python's `http.client` or a hand-written client. curl and `cix cache
+publish` were never affected: they ask with 100-continue, and curl also
+reads while it sends. Measured on e5c35b3, 10 runs per row:
+
+| refused upload, sent in full before reading | answer received |
+|---|---|
+| `Content-Length`, 8 MB or 30 MB | 0 of 10 |
+| chunked, 2 MB | 3 of 10 |
+| chunked, 3 MB or more | 0 of 10 |
+
+- **The drain is limited by time, not bytes** (#26): 30 seconds in all,
+  and 5 seconds without a byte. These are nginx's lingering-close
+  defaults (`lingering_time`, `lingering_timeout`). A 4 MiB cap had
+  turned every larger refused body into a reset. Discarding costs a read
+  into a stack buffer. Each wakeup discards at most 1 MiB, and epoll is
+  level-triggered, so the rest waits for the next pass rather than
+  holding the reactor. With three 1 GB refused uploads in flight, the
+  slowest of 20 status requests took 6 ms, against 55 ms without that
+  limit. A refused body that takes more than 30 seconds to send still
+  loses its answer, unless the client asked with 100-continue.
+- **A refusal whose length is unknown drains too** (#25): a chunked
+  request, which is always refused because an upload needs a
+  `Content-Length`, and a request refused before it could be parsed
+  (headers too large, an unreadable length). The server drains it until
+  the client closes, within the same limits. A request with no body and
+  no length still closes at once, as before.
+- **An upload with both `Content-Length` and `Transfer-Encoding` is
+  refused with 411**, even with the token. The two headers disagree
+  about where the body ends, which is how request smuggling works.
+  Before this, the server took `Content-Length` and treated the chunk
+  framing as body bytes.
+
+After both, every row in the table above answers 10 of 10, over plain
+HTTP and over HTTPS. `test_push` checks a 16 MiB body sent in full, a
+chunked upload, an upload with both headers, a malformed request, and
+a quiet client being let go after 5 seconds. The 16 MiB, chunked and
+malformed checks fail on e5c35b3, and the last fails when the 5-second
+limit is removed.
 
 ## Consequences
 

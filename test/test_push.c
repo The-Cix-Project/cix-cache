@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static int g_failures;
 
@@ -120,6 +121,148 @@ static void test_refusal_is_not_a_reset(void)
 		n = read(fd, buf, sizeof(buf));
 	while (n > 0);
 	CHECK(n == 0, "and then reads a clean end of stream, not a reset");
+	close(fd);
+}
+
+/*
+ * Writes n bytes of filler, all of it, or fails. MSG_NOSIGNAL so a
+ * reset shows up as a failed write rather than killing the test.
+ */
+static int raw_send_filler(int fd, long long n)
+{
+	static char chunk[65536];
+
+	memset(chunk, 'x', sizeof(chunk));
+	while (n > 0) {
+		size_t take = n > (long long)sizeof(chunk) ? sizeof(chunk) : (size_t)n;
+		ssize_t w = send(fd, chunk, take, MSG_NOSIGNAL);
+
+		if (w <= 0)
+			return -1;
+		n -= w;
+	}
+	return 0;
+}
+
+/*
+ * #26. A client that writes its whole request before reading a byte
+ * -- Python's http.client, or anything hand-rolled -- only hears a
+ * refusal if the server reads everything it sends. The drain used to
+ * stop at 4 MiB, so the rest of a larger body met a reset: the write
+ * failed and the 401 was never read. 16 MiB is four times that.
+ */
+static void test_write_all_then_read(void)
+{
+	const long long len = 16LL * 1024 * 1024;
+	char zeros[65];
+	int fd;
+
+	memset(zeros, '0', 64);
+	zeros[64] = '\0';
+	fd = raw_connect(PORT);
+	CHECK(fd >= 0, "connect for the write-everything-first check");
+	if (fd < 0)
+		return;
+	raw_put_header(fd, "w-1.0-1-x86_64.cixpkg", len, zeros, "wrong", 0);
+	CHECK(raw_send_filler(fd, len) == 0,
+	      "a refused 16 MiB body can be sent to the end, not cut off by a reset");
+	CHECK(raw_status(fd, 2000) == 401, "and the client then reads its 401");
+	close(fd);
+}
+
+/*
+ * #25. A refused request whose length nobody knows: a chunked body, or
+ * a request refused before it could be parsed. It is drained like any
+ * other, to the client's end of stream, instead of closed on with
+ * bytes unread -- the same deterministic check as #24's: after the
+ * answer the client can still write, and then reads a clean end.
+ */
+static void unknown_length_case(const char *what, const char *head, int want)
+{
+	char buf[256];
+	char msg[200];
+	ssize_t n;
+	int fd = raw_connect(PORT);
+
+	snprintf(msg, sizeof(msg), "connect for the %s check", what);
+	CHECK(fd >= 0, msg);
+	if (fd < 0)
+		return;
+	if (write(fd, head, strlen(head)) != (ssize_t)strlen(head))
+		fprintf(stderr, "warning: short header write\n");
+	raw_send_filler(fd, 65536);
+	snprintf(msg, sizeof(msg), "%s: refused with %d", what, want);
+	CHECK(raw_status(fd, 2000) == want, msg);
+	usleep(100000);
+	snprintf(msg, sizeof(msg), "%s: the client may finish sending after the answer", what);
+	CHECK(raw_send_filler(fd, 65536) == 0, msg);
+	shutdown(fd, SHUT_WR);
+	do
+		n = read(fd, buf, sizeof(buf));
+	while (n > 0);
+	snprintf(msg, sizeof(msg), "%s: and then reads a clean end of stream, not a reset", what);
+	CHECK(n == 0, msg);
+	close(fd);
+}
+
+static void test_unknown_length_refusals(void)
+{
+	unknown_length_case("chunked upload",
+	                    "PUT /c-1.0-1-x86_64.cixpkg HTTP/1.1\r\nHost: x\r\n"
+	                    "Transfer-Encoding: chunked\r\nX-Cix-Sha256: "
+	                    "0000000000000000000000000000000000000000000000000000000000000000"
+	                    "\r\n\r\n10000\r\n",
+	                    401);
+	/* Authorized, with a length AND a transfer coding: refused, never half-read. */
+	unknown_length_case("upload with both a length and a transfer coding",
+	                    "PUT /t-1.0-1-x86_64.cixpkg HTTP/1.1\r\nHost: x\r\n"
+	                    "Authorization: Bearer " TOKEN "\r\nContent-Length: 70000\r\n"
+	                    "Transfer-Encoding: chunked\r\nX-Cix-Sha256: "
+	                    "0000000000000000000000000000000000000000000000000000000000000000"
+	                    "\r\n\r\n",
+	                    411);
+	/* Malformed: a length nobody can read, so how much follows is unknown too. */
+	unknown_length_case("malformed request",
+	                    "PUT /m-1.0-1-x86_64.cixpkg HTTP/1.1\r\nHost: x\r\n"
+	                    "Content-Length: lots\r\n\r\n",
+	                    400);
+}
+
+/*
+ * #26's other half. Draining is limited by time, not bytes, so a
+ * client that stops sending without closing must not hold the
+ * connection for the whole 30-second window: five seconds of silence
+ * ends it.
+ *
+ * The client cannot see that close by reading -- it already has the
+ * end of stream from the half-close -- only by writing: a write to a
+ * socket the server has closed draws a reset, and the write after that
+ * fails. One byte after seven quiet seconds, then another.
+ */
+static void test_silent_drain_ends(void)
+{
+	char zeros[65];
+	char buf[256];
+	ssize_t n;
+	int fd;
+
+	memset(zeros, '0', 64);
+	zeros[64] = '\0';
+	fd = raw_connect(PORT);
+	CHECK(fd >= 0, "connect for the silent-drain check");
+	if (fd < 0)
+		return;
+	raw_put_header(fd, "s-1.0-1-x86_64.cixpkg", 10000000, zeros, "wrong", 0);
+	raw_send_filler(fd, 65536);
+	CHECK(raw_status(fd, 2000) == 401, "a refused upload that then goes quiet is answered");
+	do
+		n = read(fd, buf, sizeof(buf));
+	while (n > 0);
+	sleep(7);
+	raw_send_filler(fd, 1);
+	usleep(200000);
+	CHECK(raw_send_filler(fd, 1) != 0,
+	      "and is closed after five quiet seconds, not held for the whole drain window");
 	close(fd);
 }
 
@@ -397,6 +540,9 @@ int main(void)
 
 	test_refusal_is_not_a_reset();
 	test_expect_continue(a_path, a_digest, 200000);
+	test_write_all_then_read();
+	test_unknown_length_refusals();
+	test_silent_drain_ends();
 
 	ts_stop(&ts);
 	if (g_failures == 0)
