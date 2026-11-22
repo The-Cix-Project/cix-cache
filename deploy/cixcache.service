@@ -9,6 +9,9 @@ Type=simple
 User=osakka
 Group=ldap_users
 ExecStart=/opt/cixcache/bin/cixcached --config=/opt/cixcache/etc/cixcache.conf
+# Reloads the TLS certificate and key (ADR-0015); a failed reload keeps
+# the old one in service.
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=2
 

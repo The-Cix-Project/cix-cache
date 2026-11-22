@@ -258,6 +258,7 @@ cixctl --host=&lt;box&gt; pkg sync</code></pre>
 			<tr><td><span class="tag ok">201</span></td><td colspan="2">published</td></tr>
 			<tr><td><span class="tag warn">400</span></td><td colspan="2">body does not match the declared sha256, or the name is malformed</td></tr>
 			<tr><td><span class="tag warn">401</span></td><td colspan="2">missing or wrong token &mdash; push always needs one</td></tr>
+			<tr><td><span class="tag warn">403</span></td><td colspan="2">sent to a read-only plain-HTTP port (<code>plain_http=ro</code>) &mdash; publish over HTTPS</td></tr>
 			<tr><td><span class="tag warn">409</span></td><td colspan="2">that name already exists with <em>different</em> bytes, or it matches artifacts for more than one architecture</td></tr>
 			<tr><td><span class="tag warn">411</span></td><td colspan="2">no <code>Content-Length</code></td></tr>
 		</table>

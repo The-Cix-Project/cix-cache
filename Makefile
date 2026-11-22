@@ -18,11 +18,17 @@ BUILD := build
 CFLAGS := -Wall -Werror -D_GNU_SOURCE -D_FORTIFY_SOURCE=0 -Iinclude -I$(BUILD)
 CLIENT_CFLAGS := $(CFLAGS) -Iclient/include
 
-SERVER_SRCS := src/json.c src/http.c src/store.c src/manifest.c src/conf.c src/importer.c
+SERVER_SRCS := src/json.c src/http.c src/store.c src/manifest.c src/conf.c src/importer.c src/tls.c
+
+# HTTPS (ADR-0015). Dynamically linked, as cixd links it: a Cix image
+# declares openssl as a runtime package. The code stays inside the
+# OpenSSL 3.0 API, which is what Cix containers ship.
+TLS_LIBS := -lssl -lcrypto
 CLIENT_SRCS := client/src/httpclient.c src/json.c
 
 TESTS := $(BUILD)/test_store $(BUILD)/test_http $(BUILD)/test_serve $(BUILD)/test_push \
-	$(BUILD)/test_import $(BUILD)/test_manifest $(BUILD)/test_gc $(BUILD)/test_conf
+	$(BUILD)/test_import $(BUILD)/test_manifest $(BUILD)/test_gc $(BUILD)/test_conf \
+	$(BUILD)/test_tls
 
 PREFIX := /opt/cixcache
 
@@ -77,7 +83,7 @@ $(BUILD)/version.h: | $(BUILD)
 		"$$ident" "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$dirty" > $@
 
 $(BUILD)/cixcached: src/main.c $(SERVER_SRCS) $(BUILD)/version.h | $(BUILD)
-	$(CC) $(CFLAGS) src/main.c $(SERVER_SRCS) -o $@
+	$(CC) $(CFLAGS) src/main.c $(SERVER_SRCS) -o $@ $(TLS_LIBS)
 
 $(BUILD)/cix-cache: cli/src/main.c $(CLIENT_SRCS) $(BUILD)/version.h | $(BUILD)
 	$(CC) $(CLIENT_CFLAGS) cli/src/main.c $(CLIENT_SRCS) -o $@
@@ -110,6 +116,11 @@ $(BUILD)/test_push: test/test_push.c | $(BUILD)
 	$(CC) $(CFLAGS) -Itest $< -o $@
 
 $(BUILD)/test_gc: test/test_gc.c | $(BUILD)
+	$(CC) $(CFLAGS) -Itest $< -o $@
+
+# HTTPS, driven with curl and openssl s_client against a certificate the
+# test generates. Links no OpenSSL itself: the client side is the real one.
+$(BUILD)/test_tls: test/test_tls.c test/testserver.h | $(BUILD)
 	$(CC) $(CFLAGS) -Itest $< -o $@
 
 #

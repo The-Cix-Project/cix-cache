@@ -35,5 +35,24 @@ push_token=CHANGE-ME
 # (ADR-0002, ADR-0012).
 require_signature=.iso
 
+# HTTPS (ADR-0015). Set all three to serve it; leave all three out for
+# none. The certificate file is a chain PEM -- the leaf, then any
+# intermediates -- which is what Cix's PKI writes as tls.crt. A
+# certificate that cannot be loaded stops the server rather than
+# leaving it on plain HTTP. `systemctl reload cixcache` (SIGHUP)
+# re-reads both files, and keeps the old ones in service if the new
+# ones are bad.
+#tls_port=8443
+#tls_cert=/etc/cix-tls/tls.crt
+#tls_key=/etc/cix-tls/tls.key
+
+# What port= may do: rw (the default), ro, or off.
+#
+# ro serves every read as before and refuses every write and every use
+# of push_token on this port -- a token that works in clear is a token
+# sent in clear. Use it once HTTPS is up, while hosts still pull over
+# plain HTTP. off opens no plain port at all, and needs tls_port.
+plain_http=rw
+
 # A key this file does not mention keeps its built-in default. An empty
 # value, though, is a value -- "require_signature=" enforces nothing.

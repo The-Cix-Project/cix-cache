@@ -294,10 +294,42 @@ This is hygiene, not security. The store is not a trust boundary
 check, neither of which this setting replaces. See
 [ADR-0012](adr/0012-cixpkg-and-signature-policy.md).
 
-There is no TLS here, by design — the registry is not a trust boundary
-(`docs/adr/0002-...`). Put it behind a reverse proxy if you want transport
-encryption, but note the daemon will not carry a bearer token across a
-cross-host redirect.
+### HTTPS
+
+`cixcached` serves HTTPS itself (ADR-0015):
+
+```
+tls_port=8443
+tls_cert=/etc/cix-tls/tls.crt     # chain PEM: leaf, then any intermediates
+tls_key=/etc/cix-tls/tls.key
+plain_http=ro                     # rw (default), ro or off
+```
+
+TLS does not make the registry a trust boundary. A host still checks
+every artifact against its recipe's checksum (ADR-0002). What TLS
+protects is the push token, and the operator surface it opens, which
+otherwise cross the network in clear.
+
+- **`plain_http=ro`** keeps the plain port for pulls and refuses
+  everything else there: publish, delete, gc, import, and any use of the
+  push token, including the activity log. This is the setting for a
+  migration, while hosts still pull from the old URL.
+- **`plain_http=off`** opens no plain port at all.
+- A certificate or key that cannot be loaded **stops the server** rather
+  than leaving it serving plain HTTP.
+- **`systemctl reload cixcache`** (SIGHUP) re-reads both files. A
+  reload that fails is logged and keeps the previous certificate in
+  service.
+- TLS 1.2 is the minimum.
+
+A host must use a name in the certificate's SANs, such as
+`https://cache.uk.home.arpa`, not an IP address, and must trust the CA
+that issued it. `tools/seed.sh` copies into an HTTPS instance as it is,
+since it uses curl. Point `--to=` at the `https://` URL. To trust a site
+CA that is not in the system bundle, set `CURL_CA_BUNDLE`.
+
+Building needs OpenSSL's headers (`libssl-dev` on Debian). The daemon
+links `libssl` and `libcrypto` dynamically.
 
 ## Pointing a Cix host at it
 

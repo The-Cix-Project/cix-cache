@@ -21,6 +21,50 @@ void conf_defaults(struct conf *c)
 	snprintf(c->require_signature, sizeof(c->require_signature), "%s", ".iso");
 }
 
+int conf_parse_plain_http(const char *s, enum conf_plain_http *out)
+{
+	if (s == NULL)
+		return -1;
+	if (strcmp(s, "rw") == 0)
+		*out = CONF_PLAIN_RW;
+	else if (strcmp(s, "ro") == 0)
+		*out = CONF_PLAIN_RO;
+	else if (strcmp(s, "off") == 0)
+		*out = CONF_PLAIN_OFF;
+	else
+		return -1;
+	return 0;
+}
+
+const char *conf_plain_http_str(enum conf_plain_http v)
+{
+	return v == CONF_PLAIN_RO ? "ro" : v == CONF_PLAIN_OFF ? "off" : "rw";
+}
+
+int conf_check(const struct conf *c)
+{
+	int have_cert = c->tls_cert[0] != '\0';
+	int have_key = c->tls_key[0] != '\0';
+
+	if (c->tls_port != 0 && (!have_cert || !have_key)) {
+		fprintf(stderr, "cixcached: tls_port is set, but tls_cert and tls_key are not both set\n");
+		return -1;
+	}
+	if (c->tls_port == 0 && (have_cert || have_key)) {
+		fprintf(stderr, "cixcached: tls_cert/tls_key are set, but no tls_port to serve them on\n");
+		return -1;
+	}
+	if (c->tls_port != 0 && c->tls_port == c->port && c->plain_http != CONF_PLAIN_OFF) {
+		fprintf(stderr, "cixcached: port and tls_port are both %d\n", c->port);
+		return -1;
+	}
+	if (c->plain_http == CONF_PLAIN_OFF && c->tls_port == 0) {
+		fprintf(stderr, "cixcached: plain_http=off with no tls_port leaves nothing to serve\n");
+		return -1;
+	}
+	return 0;
+}
+
 int conf_parse_port(const char *s, int *out)
 {
 	char *end;
@@ -147,6 +191,21 @@ int conf_load(struct conf *c, const char *path)
 	overlay(buf, "push_token=", c->push_token, sizeof(c->push_token));
 	overlay(buf, "pull_token=", c->pull_token, sizeof(c->pull_token));
 	overlay(buf, "require_signature=", c->require_signature, sizeof(c->require_signature));
+	overlay(buf, "tls_cert=", c->tls_cert, sizeof(c->tls_cert));
+	overlay(buf, "tls_key=", c->tls_key, sizeof(c->tls_key));
+	if (conf_extract(buf, "tls_port=", portbuf, sizeof(portbuf)) == 0 && portbuf[0] != '\0' &&
+	    strcmp(portbuf, "0") != 0 && conf_parse_port(portbuf, &c->tls_port) != 0) {
+		fprintf(stderr, "cixcached: %s: tls_port '%s' is not a number in 1-65535\n", path,
+		        portbuf);
+		free(buf);
+		return -1;
+	}
+	if (conf_extract(buf, "plain_http=", portbuf, sizeof(portbuf)) == 0 &&
+	    conf_parse_plain_http(portbuf, &c->plain_http) != 0) {
+		fprintf(stderr, "cixcached: %s: plain_http '%s' is not rw, ro or off\n", path, portbuf);
+		free(buf);
+		return -1;
+	}
 	/*
 	 * A port the file states and the parser cannot use is fatal to the
 	 * load, not silently ignored: the caller's default would then be

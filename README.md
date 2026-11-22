@@ -19,6 +19,7 @@ build/cixcached --root=cache --bind=0.0.0.0 --port=8080
 | publish | `PUT`, with `X-Cix-Sha256` |
 | existence probe | `HEAD` |
 | auth | `Authorization: Bearer <token>` |
+| transport | HTTP, and HTTPS when `tls_port` is set (`docs/adr/0015-cixcached-serves-https.md`) |
 
 Packages are the only tier. An image is a recipe composed of packages —
 its version is the hash of its own package manifest — so a whole-rootfs
@@ -161,7 +162,9 @@ while being stored in a directory of their own.
 
 ## Building
 
-TCC only, dynamically linked against system glibc:
+TCC only, dynamically linked against system glibc, and against OpenSSL
+for HTTPS (`libssl-dev`; the code stays within the OpenSSL 3.0 API, which
+is what Cix containers ship):
 
 ```
 make          # cixcached, cix-cache, and the tests

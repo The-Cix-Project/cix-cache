@@ -5,6 +5,7 @@
 #include "linux_compat.h"
 #include "manifest.h"
 #include "store.h"
+#include "tls.h"
 #include "version.h"
 
 #include <errno.h>
@@ -39,6 +40,14 @@
  * a large window while every other connection waits.
  */
 #define SENDFILE_CHUNK (4 * 1024 * 1024)
+
+/*
+ * sendfile() cannot pass through TLS: the bytes have to be encrypted in
+ * this process. An HTTPS body is read from the blob and written through
+ * the session this much at a time, so a multi-gigabyte ISO costs one
+ * fixed buffer per connection rather than its size.
+ */
+#define TLS_CHUNK (64 * 1024)
 
 /*
  * The daemon sets no timeout of any kind on an artifact fetch: not
@@ -118,11 +127,33 @@ struct conn {
 	long long last_ms;
 	char note[16];
 	struct conn *next;
+
+	/* The events this fd is registered for, as epoll_set() last left it. */
+	unsigned armed;
+
+	/*
+	 * HTTPS. A listener serves TLS when tls_listener is set; a client
+	 * connection is TLS when ssl is set. tls_want is the direction the
+	 * session last said it was waiting for, and tls_buf holds blob bytes
+	 * taken from the file and not yet accepted by the session.
+	 */
+	int tls_listener;
+	struct ssl_st *ssl;
+	unsigned tls_want;
+	char *tls_buf;
+	size_t tls_buf_len;
+	size_t tls_buf_off;
 };
 
 static struct conf g_conf;
 static int g_epfd = -1;
 static volatile sig_atomic_t g_stop;
+static volatile sig_atomic_t g_reload;
+/*
+ * The context new HTTPS connections are made from. A reload replaces
+ * it; connections already open keep the one they started with.
+ */
+static struct ssl_ctx_st *g_tls_ctx;
 static struct conn *g_conns;
 static struct conn *g_pending_free;
 static long long g_started_ms;
@@ -179,6 +210,17 @@ static void on_signal(int sig)
 	g_stop = 1;
 }
 
+/*
+ * SIGHUP reloads the certificate and key. Cix's PKI reissues a leaf by
+ * rewriting the files and signalling the service (its ADR-0384
+ * reload_signal), so a reissue must not need a restart.
+ */
+static void on_hup(int sig)
+{
+	(void)sig;
+	g_reload = 1;
+}
+
 /* ---- connection bookkeeping ---- */
 
 static struct conn *conn_new(enum conn_kind kind, int fd)
@@ -225,6 +267,11 @@ static void conn_close(struct conn *cc)
 		return;
 	if (cc->fd >= 0) {
 		cix_epoll_ctl(g_epfd, EPOLL_CTL_DEL, cc->fd, NULL);
+		/* Before close(): close_notify is written to this fd. */
+		if (cc->ssl != NULL) {
+			tls_session_free(cc->ssl);
+			cc->ssl = NULL;
+		}
 		close(cc->fd);
 		cc->fd = -1;
 	}
@@ -253,6 +300,8 @@ static void conn_close(struct conn *cc)
 		cc->owner->child = NULL;
 	free(cc->out_buf);
 	cc->out_buf = NULL;
+	free(cc->tls_buf);
+	cc->tls_buf = NULL;
 	http_conn_free(&cc->http);
 	cc->kind = CONN_DEAD;
 	conn_unlink(cc);
@@ -277,6 +326,7 @@ static int epoll_set(struct conn *cc, uint32_t events)
 	memset(&ev, 0, sizeof(ev));
 	ev.events = events;
 	ev.data.ptr = cc;
+	cc->armed = events;
 	return cix_epoll_ctl(g_epfd, EPOLL_CTL_MOD, cc->fd, &ev);
 }
 
@@ -287,6 +337,7 @@ static int epoll_add(struct conn *cc, uint32_t events)
 	memset(&ev, 0, sizeof(ev));
 	ev.events = events;
 	ev.data.ptr = cc;
+	cc->armed = events;
 	return cix_epoll_ctl(g_epfd, EPOLL_CTL_ADD, cc->fd, &ev);
 }
 
@@ -401,7 +452,7 @@ static void respond_json(struct conn *cc, int status, struct json_writer *w)
  * why deploy.sh always generates one: a public instance with no push
  * token has no operator surface either.
  */
-static int operator_ok(const struct http_request *req);
+static int operator_ok(const struct conn *cc, const struct http_request *req);
 
 static int bearer_ok(const struct http_request *req, const char *expect)
 {
@@ -416,8 +467,21 @@ static int bearer_ok(const struct http_request *req, const char *expect)
 	return strcmp(got, expect) == 0;
 }
 
-static int operator_ok(const struct http_request *req)
+/*
+ * The push token is the operator's credential, and every check for it
+ * comes through here. A read-only plain-HTTP port never accepts it,
+ * however correct: a token that works in clear is a token sent in
+ * clear, and the next client to try it would leak it to the network.
+ */
+static int plain_read_only(const struct conn *cc)
 {
+	return cc->ssl == NULL && g_conf.plain_http == CONF_PLAIN_RO;
+}
+
+static int operator_ok(const struct conn *cc, const struct http_request *req)
+{
+	if (plain_read_only(cc))
+		return 0;
 	return bearer_ok(req, g_conf.push_token);
 }
 
@@ -727,7 +791,7 @@ static void begin_upload(struct conn *cc, const struct http_request *req, const 
 {
 	char digest[STORE_SHA256_MAX + 8];
 
-	if (!bearer_ok(req, g_conf.push_token)) {
+	if (!operator_ok(cc, req)) {
 		/*
 		 * Auth asymmetry is deliberate: pull may be open because the
 		 * consumer verifies every byte against its recipe anyway, but
@@ -1277,7 +1341,7 @@ static void api_status(struct conn *cc, const struct http_request *req)
 	 * has no use for it, and "" would read as a server that does not
 	 * know its own root.
 	 */
-	if (operator_ok(req)) {
+	if (operator_ok(cc, req)) {
 		jw_key(&w, "root");
 		jw_str(&w, store_root());
 	}
@@ -1682,6 +1746,17 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 	is_head = strcmp(req->method, "HEAD") == 0;
 
 	/*
+	 * plain_http=ro: reads are served exactly as before, and anything
+	 * that changes the store is refused here, before a body is read
+	 * and whatever token it carries. operator_ok() refuses the token
+	 * itself on this port, which covers the operator reads too.
+	 */
+	if (plain_read_only(cc) && !is_get && !is_head) {
+		respond_error(cc, 403, "this port is read-only; publish and operate over HTTPS");
+		return;
+	}
+
+	/*
 	 * Artifact paths are the only ones ending in a suffix the store
 	 * recognises, so the machine-facing namespace and the
 	 * operator-facing one cannot collide however the store is filled.
@@ -1713,7 +1788,7 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 			enum store_error e;
 			int sig_gone = 0;
 
-			if (!bearer_ok(req, g_conf.push_token)) {
+			if (!operator_ok(cc, req)) {
 				respond_error(cc, 401, "push requires a bearer token");
 				return;
 			}
@@ -1768,7 +1843,7 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 		 * endpoint is where the decision has to live.
 		 */
 		if (is_get && strcmp(ep, "log") == 0) {
-			if (!operator_ok(req)) {
+			if (!operator_ok(cc, req)) {
 				respond_error(cc, 401, "the activity log requires a bearer token");
 				return;
 			}
@@ -1776,7 +1851,7 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 			return;
 		}
 		if (is_get && strcmp(ep, "import-status") == 0) {
-			if (!operator_ok(req)) {
+			if (!operator_ok(cc, req)) {
 				respond_error(cc, 401, "import status requires a bearer token");
 				return;
 			}
@@ -1784,7 +1859,7 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 			return;
 		}
 		if (strcmp(req->method, "POST") == 0 && strcmp(ep, "gc") == 0) {
-			if (!bearer_ok(req, g_conf.push_token)) {
+			if (!operator_ok(cc, req)) {
 				respond_error(cc, 401, "gc requires a bearer token");
 				return;
 			}
@@ -1801,7 +1876,7 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 		 * caller what is in the store and cost a full walk to answer.
 		 */
 		if (is_get && strcmp(ep, "gc") == 0) {
-			if (!operator_ok(req)) {
+			if (!operator_ok(cc, req)) {
 				respond_error(cc, 401, "gc requires a bearer token");
 				return;
 			}
@@ -1809,7 +1884,7 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 			return;
 		}
 		if (strcmp(req->method, "POST") == 0 && strcmp(ep, "import") == 0) {
-			if (!bearer_ok(req, g_conf.push_token)) {
+			if (!operator_ok(cc, req)) {
 				respond_error(cc, 401, "import requires a bearer token");
 				return;
 			}
@@ -1829,6 +1904,61 @@ static void dispatch(struct conn *cc, const struct http_request *req)
 
 /* ---- event handling ---- */
 
+/*
+ * read() and write() for a client connection, either kind. A TLS
+ * session that would block leaves the direction it is waiting for in
+ * cc->tls_want, which tls_service() arms.
+ */
+static ssize_t conn_recv(struct conn *cc, void *buf, size_t n)
+{
+	if (cc->ssl != NULL)
+		return tls_recv(cc->ssl, buf, n, &cc->tls_want);
+	return read(cc->fd, buf, n);
+}
+
+static ssize_t conn_send(struct conn *cc, const void *buf, size_t n)
+{
+	if (cc->ssl != NULL)
+		return tls_send(cc->ssl, buf, n, &cc->tls_want);
+	return write(cc->fd, buf, n);
+}
+
+/*
+ * The HTTPS body path: one TLS_CHUNK from the blob at a time, kept
+ * until the session has taken all of it, because a write the session
+ * could not finish has to be offered the same bytes again. Answers
+ * like sendfile(): bytes moved, 0 at an unexpected end of file, -1 with
+ * errno.
+ */
+static ssize_t tls_send_blob(struct conn *cc)
+{
+	ssize_t n;
+
+	if (cc->tls_buf == NULL) {
+		cc->tls_buf = malloc(TLS_CHUNK);
+		if (cc->tls_buf == NULL) {
+			errno = ENOMEM;
+			return -1;
+		}
+	}
+	if (cc->tls_buf_off >= cc->tls_buf_len) {
+		off_t remaining = cc->body_len - cc->body_off;
+		size_t want = remaining > TLS_CHUNK ? TLS_CHUNK : (size_t)remaining;
+
+		n = pread(cc->blob_fd, cc->tls_buf, want, cc->body_off);
+		if (n <= 0)
+			return n;
+		cc->tls_buf_len = (size_t)n;
+		cc->tls_buf_off = 0;
+	}
+	n = conn_send(cc, cc->tls_buf + cc->tls_buf_off, cc->tls_buf_len - cc->tls_buf_off);
+	if (n > 0) {
+		cc->tls_buf_off += (size_t)n;
+		cc->body_off += n;
+	}
+	return n;
+}
+
 static void handle_read(struct conn *cc)
 {
 	char buf[READ_BUF];
@@ -1838,7 +1968,7 @@ static void handle_read(struct conn *cc)
 		ssize_t n;
 		int rc;
 
-		n = read(cc->fd, buf, sizeof(buf));
+		n = conn_recv(cc, buf, sizeof(buf));
 		if (n < 0) {
 			if (errno == EAGAIN || errno == EWOULDBLOCK)
 				return;
@@ -1891,7 +2021,7 @@ static void handle_write(struct conn *cc)
 {
 	for (;;) {
 		if (cc->state == CONN_SEND_HEADER) {
-			ssize_t n = write(cc->fd, cc->hdr + cc->hdr_off, cc->hdr_len - cc->hdr_off);
+			ssize_t n = conn_send(cc, cc->hdr + cc->hdr_off, cc->hdr_len - cc->hdr_off);
 
 			if (n < 0) {
 				if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -1925,7 +2055,10 @@ static void handle_write(struct conn *cc)
 				conn_close(cc);
 				return;
 			}
-			n = sendfile(cc->fd, cc->blob_fd, &cc->body_off, chunk);
+			if (cc->ssl != NULL)
+				n = tls_send_blob(cc);
+			else
+				n = sendfile(cc->fd, cc->blob_fd, &cc->body_off, chunk);
 			if (n < 0) {
 				if (errno == EAGAIN || errno == EWOULDBLOCK)
 					return;
@@ -1947,7 +2080,7 @@ static void handle_write(struct conn *cc)
 			continue;
 		}
 		if (cc->out_buf != NULL) {
-			ssize_t n = write(cc->fd, cc->out_buf + cc->out_off, cc->out_len - cc->out_off);
+			ssize_t n = conn_send(cc, cc->out_buf + cc->out_off, cc->out_len - cc->out_off);
 
 			if (n < 0) {
 				if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -1995,9 +2128,89 @@ static void accept_loop(struct conn *listener)
 			continue;
 		}
 		cc->state = CONN_READ_REQUEST;
+		if (listener->tls_listener) {
+			cc->ssl = g_tls_ctx != NULL ? tls_session_new(g_tls_ctx, fd) : NULL;
+			if (cc->ssl == NULL) {
+				conn_close(cc);
+				continue;
+			}
+		}
 		if (epoll_add(cc, EPOLLIN) != 0)
 			conn_close(cc);
 	}
+}
+
+static int conn_reading(const struct conn *cc)
+{
+	return cc->state == CONN_READ_REQUEST || cc->state == CONN_RECV_BODY;
+}
+
+static int conn_writing(const struct conn *cc)
+{
+	return cc->state == CONN_SEND_HEADER || cc->state == CONN_SEND_BODY;
+}
+
+/*
+ * One readiness event on an HTTPS connection.
+ *
+ * Driven by the connection's state, not by which event fired: a TLS
+ * read can be waiting for the socket to become writable and a write
+ * for it to become readable, so the event names the socket's condition
+ * and the state names the work. Then two things a plain connection
+ * never needs:
+ *
+ *   - bytes the session has already decrypted are invisible to epoll,
+ *     so a reader keeps going while the session holds any;
+ *   - the fd is re-armed for whichever direction the session is now
+ *     waiting on, if that is not the one the state implies.
+ */
+static void tls_service(struct conn *cc)
+{
+	unsigned want;
+	int rounds;
+
+	for (rounds = 0; rounds < 8; rounds++) {
+		cc->tls_want = 0;
+		if (conn_reading(cc))
+			handle_read(cc);
+		else if (conn_writing(cc))
+			handle_write(cc);
+		else
+			return; /* hashing: nothing to do until the child answers */
+		if (cc->kind == CONN_DEAD)
+			return;
+		if (!conn_reading(cc) || !tls_pending(cc->ssl))
+			break;
+	}
+	want = cc->tls_want != 0 ? cc->tls_want
+	                         : conn_reading(cc) ? EPOLLIN : conn_writing(cc) ? EPOLLOUT : 0;
+	if (want != 0 && want != cc->armed && epoll_set(cc, want) != 0)
+		conn_close(cc);
+}
+
+/*
+ * (Re)loads the certificate and key into a new context. On failure the
+ * old context, if any, stays in service: a reissue that went wrong
+ * must not take the cache off the network, and the log says why.
+ */
+static int tls_load(void)
+{
+	char err[512];
+	char desc[512];
+	struct ssl_ctx_st *ctx;
+
+	ctx = tls_server_ctx_load(g_conf.tls_cert, g_conf.tls_key, err, sizeof(err), desc,
+	                          sizeof(desc));
+	if (ctx == NULL) {
+		server_log("error", "tls: %s%s", err,
+		           g_tls_ctx != NULL ? " -- still serving the previous certificate" : "");
+		return -1;
+	}
+	if (g_tls_ctx != NULL)
+		tls_server_ctx_free(g_tls_ctx);
+	g_tls_ctx = ctx;
+	server_log("info", "tls: certificate %s", desc);
+	return 0;
 }
 
 static void sweep_timeouts(void)
@@ -2065,6 +2278,7 @@ static void usage(FILE *out)
 	        "usage: cixcached [--config=PATH] [--root=DIR] [--bind=ADDR] [--port=N]\n"
 	        "                 [--web-root=DIR] [--push-token=TOK] [--pull-token=TOK]\n"
 	        "                 [--require-signature=SUFFIXES]\n"
+	        "                 [--tls-port=N --tls-cert=PEM --tls-key=PEM] [--plain-http=rw|ro|off]\n"
 	        "       cixcached --import [--dry-run] [--root=DIR]\n"
 	        "       cixcached --canonicalize [--dry-run] [--root=DIR]\n"
 	        "       cixcached --set-arch=ARCH [--dry-run] [--root=DIR]\n"
@@ -2129,7 +2343,23 @@ int main(int argc, char **argv)
 			snprintf(g_conf.push_token, sizeof(g_conf.push_token), "%s", argv[i] + 13);
 		else if (strncmp(argv[i], "--pull-token=", 13) == 0)
 			snprintf(g_conf.pull_token, sizeof(g_conf.pull_token), "%s", argv[i] + 13);
-		else if (strncmp(argv[i], "--require-signature=", 20) == 0)
+		else if (strncmp(argv[i], "--tls-port=", 11) == 0) {
+			if (conf_parse_port(argv[i] + 11, &g_conf.tls_port) != 0) {
+				fprintf(stderr, "cixcached: --tls-port: '%s' is not a number in 1-65535\n",
+				        argv[i] + 11);
+				return 2;
+			}
+		} else if (strncmp(argv[i], "--tls-cert=", 11) == 0)
+			snprintf(g_conf.tls_cert, sizeof(g_conf.tls_cert), "%s", argv[i] + 11);
+		else if (strncmp(argv[i], "--tls-key=", 10) == 0)
+			snprintf(g_conf.tls_key, sizeof(g_conf.tls_key), "%s", argv[i] + 10);
+		else if (strncmp(argv[i], "--plain-http=", 13) == 0) {
+			if (conf_parse_plain_http(argv[i] + 13, &g_conf.plain_http) != 0) {
+				fprintf(stderr, "cixcached: --plain-http: '%s' is not rw, ro or off\n",
+				        argv[i] + 13);
+				return 2;
+			}
+		} else if (strncmp(argv[i], "--require-signature=", 20) == 0)
 			snprintf(g_conf.require_signature, sizeof(g_conf.require_signature), "%s",
 			         argv[i] + 20);
 		else if (strcmp(argv[i], "--import") == 0)
@@ -2213,22 +2443,50 @@ int main(int argc, char **argv)
 		return rc == 0 && conflicts == 0 ? 0 : 1;
 	}
 
+	if (conf_check(&g_conf) != 0) {
+		fprintf(stderr, "cixcached: not starting\n");
+		return 1;
+	}
+
 	signal(SIGPIPE, SIG_IGN);
 	signal(SIGINT, on_signal);
 	signal(SIGTERM, on_signal);
+	signal(SIGHUP, on_hup);
 
 	g_epfd = epoll_create1(EPOLL_CLOEXEC);
 	if (g_epfd < 0) {
 		perror("epoll_create1");
 		return 1;
 	}
-	listen_fd = create_listener(g_conf.bind, g_conf.port);
-	if (listen_fd < 0)
+	/*
+	 * A certificate that cannot be loaded stops the server, the way a
+	 * port that cannot be bound does (00f0b63): a daemon serving only
+	 * plain HTTP when HTTPS was asked for looks healthy and is not.
+	 */
+	if (g_conf.tls_port != 0 && tls_load() != 0) {
+		fprintf(stderr, "cixcached: not starting: the TLS certificate was not accepted\n");
 		return 1;
-	listener = conn_new(CONN_LISTENER, listen_fd);
-	if (listener == NULL || epoll_add(listener, EPOLLIN) != 0) {
-		fprintf(stderr, "cixcached: cannot register listener\n");
-		return 1;
+	}
+	if (g_conf.plain_http != CONF_PLAIN_OFF) {
+		listen_fd = create_listener(g_conf.bind, g_conf.port);
+		if (listen_fd < 0)
+			return 1;
+		listener = conn_new(CONN_LISTENER, listen_fd);
+		if (listener == NULL || epoll_add(listener, EPOLLIN) != 0) {
+			fprintf(stderr, "cixcached: cannot register listener\n");
+			return 1;
+		}
+	}
+	if (g_conf.tls_port != 0) {
+		listen_fd = create_listener(g_conf.bind, g_conf.tls_port);
+		if (listen_fd < 0)
+			return 1;
+		listener = conn_new(CONN_LISTENER, listen_fd);
+		if (listener == NULL || epoll_add(listener, EPOLLIN) != 0) {
+			fprintf(stderr, "cixcached: cannot register TLS listener\n");
+			return 1;
+		}
+		listener->tls_listener = 1;
 	}
 	g_started_ms = now_ms();
 	/*
@@ -2236,9 +2494,23 @@ int main(int argc, char **argv)
 	 * an uncommitted tree is not the release its version names, and
 	 * the log is where somebody reading back from an incident looks.
 	 */
-	server_log("info", "%s%s serving %s on %s:%d", CIXCACHE_BUILD_VERSION,
-	           CIXCACHE_BUILD_DIRTY ? " (dirty tree)" : "", g_conf.root, g_conf.bind,
-	           g_conf.port);
+	{
+		char http_desc[32];
+		char https_desc[32];
+
+		if (g_conf.plain_http == CONF_PLAIN_OFF)
+			snprintf(http_desc, sizeof(http_desc), "off");
+		else
+			snprintf(http_desc, sizeof(http_desc), ":%d (%s)", g_conf.port,
+			         conf_plain_http_str(g_conf.plain_http));
+		if (g_conf.tls_port != 0)
+			snprintf(https_desc, sizeof(https_desc), ":%d", g_conf.tls_port);
+		else
+			snprintf(https_desc, sizeof(https_desc), "off");
+		server_log("info", "%s%s serving %s on %s, http %s, https %s", CIXCACHE_BUILD_VERSION,
+		           CIXCACHE_BUILD_DIRTY ? " (dirty tree)" : "", g_conf.root, g_conf.bind,
+		           http_desc, https_desc);
+	}
 	fflush(stdout);
 
 	while (!g_stop) {
@@ -2251,6 +2523,13 @@ int main(int argc, char **argv)
 		 * swept on schedule rather than only when other traffic
 		 * happens to wake the loop.
 		 */
+		if (g_reload) {
+			g_reload = 0;
+			if (g_conf.tls_port != 0)
+				tls_load();
+			else
+				server_log("info", "SIGHUP: no TLS configured, nothing to reload");
+		}
 		n = cix_epoll_wait(g_epfd, events, MAX_EVENTS, 1000);
 		if (n < 0) {
 			if (errno == EINTR)
@@ -2292,6 +2571,10 @@ int main(int argc, char **argv)
 			}
 			if ((events[k].events & (EPOLLHUP | EPOLLERR)) != 0) {
 				conn_close(cc);
+				continue;
+			}
+			if (cc->ssl != NULL) {
+				tls_service(cc);
 				continue;
 			}
 			if ((events[k].events & EPOLLIN) != 0)

@@ -46,7 +46,15 @@ static int ts_port_open(int port)
 	return ok;
 }
 
-static int ts_start(struct testserver *ts, int port, const char *push_token)
+/*
+ * Starts cixcached with the harness's own flags plus extra, a
+ * NULL-terminated list (or NULL), and waits until wait_port accepts a
+ * connection. Returns 0, or -1 if it never did. A server that exits
+ * instead -- one that refused its configuration -- is noticed at once
+ * rather than waited out.
+ */
+static int ts_start_with(struct testserver *ts, int port, const char *push_token,
+                         const char *const *extra, int wait_port)
 {
 	char tmpl[] = "/tmp/cixcache-it-XXXXXX";
 	char portarg[32];
@@ -66,22 +74,40 @@ static int ts_start(struct testserver *ts, int port, const char *push_token)
 	if (ts->pid < 0)
 		return -1;
 	if (ts->pid == 0) {
+		const char *args[32];
 		int devnull = open("/dev/null", O_WRONLY);
+		int n = 0;
 
 		if (devnull >= 0) {
 			dup2(devnull, STDOUT_FILENO);
 			close(devnull);
 		}
-		execl("build/cixcached", "cixcached", rootarg, portarg, "--bind=127.0.0.1", tokarg,
-		      (char *)NULL);
+		args[n++] = "cixcached";
+		args[n++] = rootarg;
+		args[n++] = portarg;
+		args[n++] = "--bind=127.0.0.1";
+		args[n++] = tokarg;
+		while (extra != NULL && *extra != NULL && n < 31)
+			args[n++] = *extra++;
+		args[n] = NULL;
+		execv("build/cixcached", (char *const *)args);
 		_exit(127);
 	}
 	for (tries = 0; tries < 200; tries++) {
-		if (ts_port_open(port))
+		if (ts_port_open(wait_port))
 			return 0;
+		if (waitpid(ts->pid, NULL, WNOHANG) == ts->pid) {
+			ts->pid = -1;
+			return -1;
+		}
 		usleep(25000);
 	}
 	return -1;
+}
+
+static int ts_start(struct testserver *ts, int port, const char *push_token)
+{
+	return ts_start_with(ts, port, push_token, NULL, port);
 }
 
 static void ts_stop(struct testserver *ts)

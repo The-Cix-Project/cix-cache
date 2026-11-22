@@ -129,7 +129,10 @@ info "store  $STORE"
 if [ "$SKIP_PACKAGES" != 1 ]; then
 	say "Packages"
 	missing=()
-	for pkg in git make tcc curl ca-certificates fail2ban; do
+	# libssl-dev: cixcached links OpenSSL for HTTPS (ADR-0015), even
+	# behind Caddy. openssl: test_tls generates its certificates with it,
+	# and the tests gate the install.
+	for pkg in git make tcc libssl-dev openssl curl ca-certificates fail2ban; do
 		dpkg -s "$pkg" >/dev/null 2>&1 || missing+=("$pkg")
 	done
 	if [ ${#missing[@]} -gt 0 ]; then
@@ -442,7 +445,7 @@ if [ "$SKIP_SYSTEMD" != 1 ]; then
 		# something other than Caddy would grow one by itself, an hour
 		# later, unattended.
 		Environment=CIXCACHE_SKIP_CADDY=$SKIP_CADDY
-		# Deliberately NOT skipping the package step. The check is six
+		# Deliberately NOT skipping the package step. The check is eight
 		# dpkg queries and ~80ms when nothing is missing, and skipping
 		# it meant a release that needs a new dependency could never
 		# install one on a machine that only ever updates by timer.

@@ -17,6 +17,10 @@
  *   push_token=<token>
  *   pull_token=              (empty -- pull is open)
  *   require_signature=.iso   (suffixes an unsigned publish is refused for)
+ *   tls_port=8443            (0 or absent -- no HTTPS)
+ *   tls_cert=/etc/cix-tls/tls.crt
+ *   tls_key=/etc/cix-tls/tls.key
+ *   plain_http=rw            (rw, ro or off -- what port= is allowed to do)
  *
  * A key the file does not mention keeps the default conf_defaults()
  * set. This is an overlay, not a replacement.
@@ -24,6 +28,8 @@
 
 #define CONF_PATH_MAX 512
 #define CONF_TOKEN_MAX 256
+
+enum conf_plain_http { CONF_PLAIN_RW, CONF_PLAIN_RO, CONF_PLAIN_OFF };
 
 struct conf {
 	char root[CONF_PATH_MAX];
@@ -39,6 +45,22 @@ struct conf {
 	 * this is only how an operator states it. Default ".iso".
 	 */
 	char require_signature[CONF_TOKEN_MAX];
+	/*
+	 * HTTPS. tls_port 0 means none. A port without a certificate and
+	 * key, or a certificate without a port, is refused by
+	 * conf_check(): either is a daemon that starts and does not serve
+	 * what its operator asked for.
+	 */
+	int tls_port;
+	char tls_cert[CONF_PATH_MAX];
+	char tls_key[CONF_PATH_MAX];
+	/*
+	 * What the plain-HTTP port may do once HTTPS exists. Read-only
+	 * keeps every unauthenticated pull working and accepts nothing
+	 * that needs the push token, which would otherwise cross the
+	 * network in clear. See docs/adr/0015-cixcached-serves-https.md.
+	 */
+	enum conf_plain_http plain_http;
 };
 
 void conf_defaults(struct conf *c);
@@ -72,5 +94,22 @@ int conf_extract(const char *buf, const char *key, char *out, size_t out_size);
  * bound 34463 and said it had bound 99999 (#16).
  */
 int conf_parse_port(const char *s, int *out);
+
+/*
+ * Parses plain_http: "rw", "ro" or "off". Shared by the config path and
+ * the flag path for the same reason conf_parse_port() is. 0, or -1
+ * leaving *out alone.
+ */
+int conf_parse_plain_http(const char *s, enum conf_plain_http *out);
+
+/* The spelling conf_parse_plain_http() accepts for v. */
+const char *conf_plain_http_str(enum conf_plain_http v);
+
+/*
+ * The settings that are only wrong together, checked once every source
+ * -- defaults, file, flags -- has been applied. 0, or -1 with the
+ * reason written to stderr.
+ */
+int conf_check(const struct conf *c);
 
 #endif /* CONF_H */
