@@ -32,7 +32,8 @@ Facts this rests on, from the cix maintainer on 2026-11-22:
 - Cix containers ship OpenSSL **3.0** (`openssl@3.0.20-9`). A recipe that
   declares the tool gets its headers, and TCC builds against it are
   routine (hostapd). The development box has 3.5.7, so the code is held to
-  the 3.0 API. Every OpenSSL call in `src/tls.c` exists in 3.0, and the
+  the 3.0 API. Every OpenSSL call in `src/tls.c` and
+  `client/src/httpclient.c` exists in 3.0, and the
   newest is `SSL_OP_IGNORE_UNEXPECTED_EOF`, added in 3.0. Compiling with
   `OPENSSL_API_COMPAT=30000` and `OPENSSL_NO_DEPRECATED` rules out
   deprecated calls but not newer ones. The build against 3.0.20 in the
@@ -149,6 +150,14 @@ variable names are the ones cix#726 proposes for cixctl, so the two
 tools agree if that lands. A response shorter than its Content-Length
 is an error, since a TLS client that reads to close has no other way
 to tell a cut-off body from a complete one.
+
+One limit is known. A server that refuses a publish answers before
+reading the body, then closes. Over plain HTTP the client still reads
+that answer and reports it. Over HTTPS, a write that fails ends the
+session, so for a body larger than the socket buffers the status is
+lost, and `cix cache` says the server refused partway through without
+saying why. Closing that gap needs `Expect: 100-continue` in the
+server, which is a change of its own.
 
 The cost is that cix-cache no longer shares a client with Cix. If
 cix#726 lands, copying it back is a choice to make then, not an

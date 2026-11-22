@@ -561,9 +561,23 @@ static int cmd_put(const struct cix_client *c, int argc, char **argv)
 		printf("published %s (%lld bytes)\n", name, sent);
 		return 0;
 	}
-	if (status == 0)
-		fprintf(stderr, "cixcachectl: no answer after %lld of %lld bytes: %s\n", sent,
-		        (long long)st.st_size, cix_client_last_error());
+	/*
+	 * The server stopped reading partway through: it refused the
+	 * publish before taking the body -- a wrong token, a read-only
+	 * port, a conflicting name -- and closed. Over plain HTTP its
+	 * answer is still readable, and was reported above. Over HTTPS a
+	 * failed write ends the session, so the answer is lost with it;
+	 * say what is known rather than "no answer".
+	 */
+	if (status == 0 && sent < (long long)st.st_size)
+		fprintf(stderr,
+		        "cixcachectl: the server refused the publish after %lld of %lld bytes, and "
+		        "closed before its reason could be read (check --token, and that this is not a "
+		        "read-only port; the server's log has the status)\n",
+		        sent, (long long)st.st_size);
+	else if (status == 0)
+		fprintf(stderr, "cixcachectl: no answer after %lld bytes: %s\n", sent,
+		        cix_client_last_error());
 	else
 		fprintf(stderr, "cixcachectl: push rejected (HTTP %d)\n", status);
 	return 1;

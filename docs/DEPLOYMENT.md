@@ -19,7 +19,7 @@ a binary must not overwrite either.
 The unit runs unprivileged under `ProtectSystem=strict` with the store as
 its only writable path. The registry serves opaque bytes and is never a
 trust boundary, so it needs no privilege beyond reading its store and
-binding one port. Point `ReadWritePaths=` at whatever `root=` is.
+binding its ports. Point `ReadWritePaths=` at whatever `root=` is.
 
 ```
 systemctl status cixcache
